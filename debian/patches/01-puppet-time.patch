@@ -1,0 +1,52 @@
+Author: John-Mark Bell <jmb@pexip.com>
+Date  : Mon Feb 25 17:49:43 2013 +0000
+
+    Handle time going backwards
+
+    THIRD-PARTY: Apache 2.0
+
+--- puppet-3.1.1/lib/puppet/daemon.rb	2013-02-04 18:27:48.000000000 +0000
++++ puppet-3.1.1/lib/puppet/daemon.rb	2013-02-25 17:25:39.457729558 +0000
+@@ -187,7 +187,6 @@
+         # Set up the next reparse check based on the new reparse_interval.
+         if reparse_interval > 0
+           next_reparse = now + reparse_interval
+-          next_event > next_reparse and next_event = next_reparse
+         end
+ 
+         # We should also recalculate the agent run interval, and adjust the
+@@ -198,6 +197,11 @@
+         agent_run_interval  = new_run_interval
+       end
+ 
++      # Forcibly update the reparse time if it is too far in the future
++      if reparse_interval > 0 and (next_reparse - now) > reparse_interval
++        next_reparse = now + reparse_interval
++      end
++
+       # Handle triggering another agent run.  This will block the next check
+       # for configuration reparsing, which is a desired and deliberate
+       # behaviour.  You should not change that. --daniel 2012-02-21
+@@ -206,9 +210,21 @@
+ 
+         # Set up the next agent run time
+         next_agent_run = now + agent_run_interval
+-        next_event > next_agent_run and next_event = next_agent_run
+       end
+ 
++      # Forcibly update the agent run time if it is too far in the future
++      if agent and (next_agent_run - now) > agent_run_interval
++        next_agent_run = now + agent_run_interval
++      end
++
++      # Compute next event time
++      if reparse_interval > 0
++        next_event > next_reparse and next_event = next_reparse
++      end
++      if agent
++        next_event > next_agent_run and next_event = next_agent_run
++      end
++
+       # Finally, an interruptable able sleep until the next scheduled event.
+       how_long = next_event - now
+       how_long > 0 and select([], [], [], how_long)
