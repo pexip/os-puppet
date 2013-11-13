@@ -1,3 +1,10 @@
+puppet (3.1.1-1puppetlabs1pexip2) precise; urgency=low
+
+  * debian/puppet.init:
+    - Wait for all agent processes to stop
+
+ -- John-Mark Bell <jmb@pexip.com>  Thu, 13 Nov 2013 16:15:27 +0000
+
 puppet (3.1.1-1puppetlabs1pexip1) precise; urgency=low
 
   * debian/control:
