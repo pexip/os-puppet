@@ -1,3 +1,9 @@
+puppet (3.1.1-1puppetlabs1pexip4) precise; urgency=low
+
+  * Add puppet-upgrade-helper so upgrades work.
+
+ -- John-Mark Bell <jmb@pexip.com>  Tue, 17 Dec 2013 13:25:51 +0000
+
 puppet (3.1.1-1puppetlabs1pexip3) precise; urgency=low
 
   * debian/puppet.init:

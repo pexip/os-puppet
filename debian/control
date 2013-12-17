@@ -35,9 +35,14 @@ Description: Centralized configuration management
  scripts needed to run the puppet agent and master, see the "puppet" and
  "puppetmaster" packages, respectively.
 
+Package: puppet-upgrade-helper
+Architecture: all
+Depends: ${misc:Depends}, puppet-common (= ${binary:Version})
+Description: Package to aid puppet upgrades.
+
 Package: puppet
 Architecture: all
-Depends: ${misc:Depends},  puppet-common (= ${binary:Version}), ruby | ruby-interpreter
+Depends: ${misc:Depends}, puppet-upgrade-helper (= ${source:Version}), ruby | ruby-interpreter
 Recommends: rdoc
 Suggests: puppet-el, vim-puppet
 Description: Centralized configuration management - agent startup and compatibility scripts
