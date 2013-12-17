@@ -1,3 +1,10 @@
+puppet (3.1.1-1puppetlabs1pexip3) precise; urgency=low
+
+  * debian/puppet.init:
+    - Add backstop timer to agent exit wait
+
+ -- John-Mark Bell <jmb@pexip.com>  Tue, 10 Dec 2013 23:44:21 +0000
+
 puppet (3.1.1-1puppetlabs1pexip2) precise; urgency=low
 
   * debian/puppet.init:

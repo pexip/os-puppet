@@ -45,8 +45,16 @@ start_puppet_agent() {
 
 stop_puppet_agent() {
     start-stop-daemon --stop --retry TERM/10/KILL/5 --quiet --oknodo --pidfile $PIDFILE
-    # Wait for all running agents to stop (compare with 1 as we match)
-    while [ $(pgrep -c -U root puppet) -gt 1 ]; do sleep 1; done
+    # Wait for all running agents to stop
+    i=0
+    while [ $(pgrep -c -U root -f "puppet agent") -gt 0 ] && [ $i -lt 15 ]; do 
+        sleep 1;
+        i=$((i+1))
+    done
+    if [ $(pgrep -c -U root -f "puppet agent") -gt 0 ]; then
+        # Kill off any that are still running
+        pkill -KILL -U root -f "puppet agent"
+    fi
 }
 
 status_puppet_agent() {
