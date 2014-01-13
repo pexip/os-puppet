@@ -1,0 +1,120 @@
+diff --git a/lib/puppet/provider/package/apt.rb b/lib/puppet/provider/package/apt.rb
+index b7bc031..16293ef 100755
+--- a/lib/puppet/provider/package/apt.rb
++++ b/lib/puppet/provider/package/apt.rb
+@@ -10,7 +10,7 @@ Puppet::Type.type(:package).provide :apt, :parent => :dpkg, :source => :dpkg do
+   commands :aptcache => "/usr/bin/apt-cache"
+   commands :preseed => "/usr/bin/debconf-set-selections"
+ 
+-  defaultfor :operatingsystem => [:debian, :ubuntu]
++  defaultfor :operatingsystem => [:debian, :ubuntu, :pexos]
+ 
+   ENV['DEBIAN_FRONTEND'] = "noninteractive"
+ 
+diff --git a/lib/puppet/provider/service/debian.rb b/lib/puppet/provider/service/debian.rb
+index 5903bd0..2db7ebd 100755
+--- a/lib/puppet/provider/service/debian.rb
++++ b/lib/puppet/provider/service/debian.rb
+@@ -16,7 +16,7 @@ Puppet::Type.type(:service).provide :debian, :parent => :init do
+   # is resolved.
+   commands :invoke_rc => "/usr/sbin/invoke-rc.d"
+ 
+-  defaultfor :operatingsystem => [:debian, :ubuntu]
++  defaultfor :operatingsystem => [:debian, :ubuntu, :pexos]
+ 
+   def self.defpath
+     superclass.defpath
+diff --git a/lib/puppet/provider/service/upstart.rb b/lib/puppet/provider/service/upstart.rb
+index 221d970..93a6c47 100755
+--- a/lib/puppet/provider/service/upstart.rb
++++ b/lib/puppet/provider/service/upstart.rb
+@@ -11,9 +11,9 @@ Puppet::Type.type(:service).provide :upstart, :parent => :debian do
+   on Ubuntu. For `upstart` documentation, see <http://upstart.ubuntu.com/>.
+   "
+   # confine to :ubuntu for now because I haven't tested on other platforms
+-  confine :operatingsystem => :ubuntu #[:ubuntu, :fedora, :debian]
++  confine :operatingsystem => [:ubuntu, :pexos] #[:ubuntu, :fedora, :debian]
+ 
+-  defaultfor :operatingsystem => :ubuntu
++  defaultfor :operatingsystem => [:ubuntu, :pexos]
+ 
+   commands :start   => "/sbin/start",
+            :stop    => "/sbin/stop",
+diff --git a/spec/fixtures/releases/jamtur01-apache/lib/puppet/provider/a2mod/debian.rb b/spec/fixtures/releases/jamtur01-apache/lib/puppet/provider/a2mod/debian.rb
+index 82ced05..5943830 100644
+--- a/spec/fixtures/releases/jamtur01-apache/lib/puppet/provider/a2mod/debian.rb
++++ b/spec/fixtures/releases/jamtur01-apache/lib/puppet/provider/a2mod/debian.rb
+@@ -4,7 +4,7 @@ Puppet::Type.type(:a2mod).provide(:debian) do
+     commands :encmd => "a2enmod"
+     commands :discmd => "a2dismod"
+ 
+-    defaultfor :operatingsystem => [:debian, :ubuntu]
++    defaultfor :operatingsystem => [:debian, :ubuntu, :pexos]
+ 
+     def create
+         encmd resource[:name]
+diff --git a/spec/fixtures/releases/jamtur01-apache/manifests/init.pp b/spec/fixtures/releases/jamtur01-apache/manifests/init.pp
+index bd3f7ba..9816132 100644
+--- a/spec/fixtures/releases/jamtur01-apache/manifests/init.pp
++++ b/spec/fixtures/releases/jamtur01-apache/manifests/init.pp
+@@ -23,6 +23,7 @@ class apache {
+   }
+   $vdir = $operatingsystem? {
+     'ubuntu' => '/etc/apache2/sites-enabled/',
++    'pexos' => '/etc/apache2/sites-enabled/',
+     default => '/etc/httpd/conf.d',
+   }
+   file { $vdir:
+diff --git a/spec/fixtures/releases/jamtur01-apache/manifests/params.pp b/spec/fixtures/releases/jamtur01-apache/manifests/params.pp
+index 520eccb..aa3847a 100644
+--- a/spec/fixtures/releases/jamtur01-apache/manifests/params.pp
++++ b/spec/fixtures/releases/jamtur01-apache/manifests/params.pp
+@@ -13,5 +13,10 @@ class apache::params{
+        $ssl_package = apache-ssl
+        $apache_dev  = [ libaprutil1-dev, libapr1-dev, apache2-prefork-dev ]
+     }
++    "pexos": {
++       $apache_name = apache2
++       $ssl_package = apache-ssl
++       $apache_dev  = [ libaprutil1-dev, libapr1-dev, apache2-prefork-dev ]
++    }
+   }
+ }
+diff --git a/spec/fixtures/releases/jamtur01-apache/manifests/ssl.pp b/spec/fixtures/releases/jamtur01-apache/manifests/ssl.pp
+index 349f922..f958c78 100644
+--- a/spec/fixtures/releases/jamtur01-apache/manifests/ssl.pp
++++ b/spec/fixtures/releases/jamtur01-apache/manifests/ssl.pp
+@@ -11,5 +11,8 @@ class apache::ssl {
+      "ubuntu": {
+         a2mod { "ssl": ensure => present, }
+      }
++     "pexos": {
++        a2mod { "ssl": ensure => present, }
++     }
+   }
+ }
+diff --git a/spec/fixtures/releases/jamtur01-apache/manifests/vhost.pp b/spec/fixtures/releases/jamtur01-apache/manifests/vhost.pp
+index 2fe6ed2..0d2f7eb 100644
+--- a/spec/fixtures/releases/jamtur01-apache/manifests/vhost.pp
++++ b/spec/fixtures/releases/jamtur01-apache/manifests/vhost.pp
+@@ -2,6 +2,7 @@ define apache::vhost( $port, $docroot, $ssl=true, $template='apache/vhost-defaul
+   include apache
+   $vdir = $operatingsystem? {
+     'ubuntu' => '/etc/apache2/sites-enabled/',
++    'pexos' => '/etc/apache2/sites-enabled/',
+     default => '/etc/httpd/conf.d',
+   }
+   file{"${vdir}/${priority}-${name}":
+diff --git a/spec/integration/type/package_spec.rb b/spec/integration/type/package_spec.rb
+index 34d648d..1718509 100755
+--- a/spec/integration/type/package_spec.rb
++++ b/spec/integration/type/package_spec.rb
+@@ -11,7 +11,7 @@ describe Puppet::Type.type(:package), "when choosing a default package provider"
+     if Facter.value(:operatingsystem) == 'Solaris' && Puppet::Util::Package.versioncmp(Facter.value(:kernelrelease), '5.11') >= 0
+       :pkg
+     else
+-      {"Ubuntu" => :apt, "Debian" => :apt, "Darwin" => :pkgdmg, "RedHat" => :up2date, "Fedora" => :yum, "FreeBSD" => :ports, "OpenBSD" => :openbsd, "Solaris" => :sun, "DragonFly" => :pkgin}[os]
++      {"Ubuntu" => :apt, "Debian" => :apt, "PexOS" => :apt, "Darwin" => :pkgdmg, "RedHat" => :up2date, "Fedora" => :yum, "FreeBSD" => :ports, "OpenBSD" => :openbsd, "Solaris" => :sun, "DragonFly" => :pkgin}[os]
+     end
+   end
+ 
