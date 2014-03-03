@@ -1,0 +1,356 @@
+diff --git a/lib/puppet/application/filebucket.rb b/lib/puppet/application/filebucket.rb
+index 4bb7b37..6828749 100644
+--- a/lib/puppet/application/filebucket.rb
++++ b/lib/puppet/application/filebucket.rb
+@@ -31,14 +31,14 @@ Puppet filebucket can operate in three modes, with only one mode per call:
+ 
+ backup:
+   Send one or more files to the specified file bucket. Each sent file is
+-  printed with its resulting md5 sum.
++  printed with its resulting sha1 sum.
+ 
+ get:
+-  Return the text associated with an md5 sum. The text is printed to
++  Return the text associated with an sha1 sum. The text is printed to
+   stdout, and only one file can be retrieved at a time.
+ 
+ restore:
+-  Given a file path and an md5 sum, store the content associated with
++  Given a file path and an sha1 sum, store the content associated with
+   the sum into the specified file path. You can specify an entirely new
+   path to this argument; you are not restricted to restoring the content
+   to its original location.
+@@ -120,8 +120,8 @@ Copyright (c) 2011 Puppet Labs, LLC Licensed under the Apache 2.0 License
+   end
+ 
+   def get
+-    md5 = args.shift
+-    out = @client.getfile(md5)
++    sha1 = args.shift
++    out = @client.getfile(sha1)
+     print out
+   end
+ 
+@@ -137,15 +137,15 @@ Copyright (c) 2011 Puppet Labs, LLC Licensed under the Apache 2.0 License
+         $stderr.puts "#{file}: cannot read file"
+         next
+       end
+-      md5 = @client.backup(file)
+-      puts "#{file}: #{md5}"
++      sha1 = @client.backup(file)
++      puts "#{file}: #{sha1}"
+     end
+   end
+ 
+   def restore
+     file = args.shift
+-    md5 = args.shift
+-    @client.restore(file, md5)
++    sha1 = args.shift
++    @client.restore(file, sha1)
+   end
+ 
+   def setup
+diff --git a/lib/puppet/face/file.rb b/lib/puppet/face/file.rb
+index f63350e..83163e8 100644
+--- a/lib/puppet/face/file.rb
++++ b/lib/puppet/face/file.rb
+@@ -7,7 +7,7 @@ Puppet::Indirector::Face.define(:file, '0.0.1') do
+   summary "Retrieve and store files in a filebucket"
+   description <<-'EOT'
+     This subcommand interacts with objects stored in a local or remote
+-    filebucket. File objects are accessed by their MD5 sum; see the
++    filebucket. File objects are accessed by their SHA1 sum; see the
+     examples for the relevant syntax.
+   EOT
+   notes <<-'EOT'
+@@ -24,7 +24,7 @@ Puppet::Indirector::Face.define(:file, '0.0.1') do
+ 
+   file = get_action(:find)
+   file.summary "Retrieve a file from the filebucket."
+-  file.arguments "md5/<md5sum>"
++  file.arguments "sha1/<sha1sum>"
+   file.returns <<-'EOT'
+     The file object with the specified checksum.
+ 
+@@ -37,7 +37,7 @@ Puppet::Indirector::Face.define(:file, '0.0.1') do
+   file.examples <<-'EOT'
+     Retrieve the contents of a file:
+ 
+-    $ puppet file find md5/9aedba7f413c97dc65895b1cd9421f2c --render-as s
++    $ puppet file find sha1/9aedba7f413c97dc65895b1cd9421f2c --render-as s
+   EOT
+ 
+   get_action(:search).summary "Invalid for this subcommand."
+diff --git a/lib/puppet/face/file/download.rb b/lib/puppet/face/file/download.rb
+index aae3185..6d810df 100644
+--- a/lib/puppet/face/file/download.rb
++++ b/lib/puppet/face/file/download.rb
+@@ -2,7 +2,7 @@
+ Puppet::Face.define(:file, '0.0.1') do
+   action :download do |*args|
+     summary "Download a file into the local filebucket."
+-    arguments "( {md5}<checksum> | <puppet_url> )"
++    arguments "( {sha1}<checksum> | <puppet_url> )"
+     returns "Nothing."
+     description <<-EOT
+       Downloads a file from the puppet master's filebucket and duplicates it in
+@@ -14,9 +14,9 @@ Puppet::Face.define(:file, '0.0.1') do
+ 
+       $ puppet file download puppet:///modules/editors/vim/.vimrc
+ 
+-      Download a file by MD5 sum:
++      Download a file by SHA1 sum:
+ 
+-      $ puppet file download {md5}8f798d4e754db0ac89186bbaeaf0af18
++      $ puppet file download {sha1}8f798d4e754db0ac89186bbaeaf0af18
+     EOT
+ 
+     when_invoked do |sum, options|
+diff --git a/lib/puppet/face/module/changes.rb b/lib/puppet/face/module/changes.rb
+index 19f632e..093c03b 100644
+--- a/lib/puppet/face/module/changes.rb
++++ b/lib/puppet/face/module/changes.rb
+@@ -3,7 +3,7 @@ Puppet::Face.define(:module, '1.0.0') do
+     summary "Show modified files of an installed module."
+     description <<-EOT
+       Shows any files in a module that have been modified since it was
+-      installed. This action compares the files on disk to the md5 checksums
++      installed. This action compares the files on disk to the sha1 checksums
+       included in the module's metadata.
+     EOT
+ 
+diff --git a/lib/puppet/file_bucket/dipper.rb b/lib/puppet/file_bucket/dipper.rb
+index 2433a0e..cbceb90 100644
+--- a/lib/puppet/file_bucket/dipper.rb
++++ b/lib/puppet/file_bucket/dipper.rb
+@@ -55,7 +55,7 @@ class Puppet::FileBucket::Dipper
+ 
+   # Retrieve a file by sum.
+   def getfile(sum)
+-    source_path = "#{@rest_path}md5/#{sum}"
++    source_path = "#{@rest_path}sha1/#{sum}"
+     file_bucket_file = Puppet::FileBucket::File.indirection.find(source_path, :bucket_path => @local_path)
+ 
+     raise Puppet::Error, "File not found" unless file_bucket_file
+@@ -66,7 +66,7 @@ class Puppet::FileBucket::Dipper
+   def restore(file,sum)
+     restore = true
+     if FileTest.exists?(file)
+-      cursum = Digest::MD5.hexdigest(IO.binread(file))
++      cursum = Digest::SHA1.hexdigest(IO.binread(file))
+ 
+       # if the checksum has changed...
+       # this might be extra effort
+@@ -78,7 +78,7 @@ class Puppet::FileBucket::Dipper
+     if restore
+       if newcontents = getfile(sum)
+         tmp = ""
+-        newsum = Digest::MD5.hexdigest(newcontents)
++        newsum = Digest::SHA1.hexdigest(newcontents)
+         changed = nil
+         if FileTest.exists?(file) and ! FileTest.writable?(file)
+           changed = ::File.stat(file).mode
+diff --git a/lib/puppet/file_bucket/file.rb b/lib/puppet/file_bucket/file.rb
+index be38a7b..eb127d5 100644
+--- a/lib/puppet/file_bucket/file.rb
++++ b/lib/puppet/file_bucket/file.rb
+@@ -1,7 +1,7 @@
+ require 'puppet/file_bucket'
+ require 'puppet/indirector'
+ require 'puppet/util/checksums'
+-require 'digest/md5'
++require 'digest/sha1'
+ 
+ class Puppet::FileBucket::File
+   # This class handles the abstract notion of a file in a filebucket.
+@@ -22,7 +22,7 @@ class Puppet::FileBucket::File
+   end
+ 
+   def checksum_type
+-    'md5'
++    'sha1'
+   end
+ 
+   def checksum
+@@ -30,7 +30,7 @@ class Puppet::FileBucket::File
+   end
+ 
+   def checksum_data
+-    @checksum_data ||= Digest::MD5.hexdigest(contents)
++    @checksum_data ||= Digest::SHA1.hexdigest(contents)
+   end
+ 
+   def to_s
+diff --git a/lib/puppet/file_serving/metadata.rb b/lib/puppet/file_serving/metadata.rb
+index 877f5d2..ac29b6a 100644
+--- a/lib/puppet/file_serving/metadata.rb
++++ b/lib/puppet/file_serving/metadata.rb
+@@ -100,7 +100,7 @@ class Puppet::FileServing::Metadata < Puppet::FileServing::Base
+       @checksum_type = checksum['type']
+       @checksum      = checksum['value']
+     end
+-    @checksum_type ||= "md5"
++    @checksum_type ||= "sha1"
+     @ftype       = data.delete('type')
+     @destination = data.delete('destination')
+     super(path,data)
+diff --git a/lib/puppet/indirector/file_bucket_file/file.rb b/lib/puppet/indirector/file_bucket_file/file.rb
+index ca79e78..2f7ea6d 100644
+--- a/lib/puppet/indirector/file_bucket_file/file.rb
++++ b/lib/puppet/indirector/file_bucket_file/file.rb
+@@ -106,11 +106,11 @@ module Puppet::FileBucketFile
+ 
+     def request_to_checksum_and_path( request )
+       checksum_type, checksum, path = request.key.split(/\//, 3)
+-      if path == '' # Treat "md5/<checksum>/" like "md5/<checksum>"
++      if path == '' # Treat "sha1/<checksum>/" like "sha1/<checksum>"
+         path = nil
+       end
+-      raise "Unsupported checksum type #{checksum_type.inspect}" if checksum_type != 'md5'
+-      raise "Invalid checksum #{checksum.inspect}" if checksum !~ /^[0-9a-f]{32}$/
++      raise "Unsupported checksum type #{checksum_type.inspect}" if checksum_type != 'sha1'
++      raise "Invalid checksum #{checksum.inspect}" if checksum !~ /^[0-9a-f]{40}$/
+       [checksum, path]
+     end
+ 
+diff --git a/lib/puppet/module_tool/checksums.rb b/lib/puppet/module_tool/checksums.rb
+index f2c6971..0dac779 100644
+--- a/lib/puppet/module_tool/checksums.rb
++++ b/lib/puppet/module_tool/checksums.rb
+@@ -1,4 +1,4 @@
+-require 'digest/md5'
++require 'digest/sha1'
+ 
+ module Puppet::ModuleTool
+ 
+@@ -16,7 +16,7 @@ module Puppet::ModuleTool
+ 
+     # Return checksum for the +Pathname+.
+     def checksum(pathname)
+-      return Digest::MD5.hexdigest(pathname.read)
++      return Digest::SHA1.hexdigest(pathname.read)
+     end
+ 
+     # Return checksums for object's +Pathname+, generate if it's needed.
+diff --git a/lib/puppet/parser/functions/fqdn_rand.rb b/lib/puppet/parser/functions/fqdn_rand.rb
+index b39c0bb..6c09b8f 100644
+--- a/lib/puppet/parser/functions/fqdn_rand.rb
++++ b/lib/puppet/parser/functions/fqdn_rand.rb
+@@ -1,4 +1,4 @@
+-require 'digest/md5'
++require 'digest/sha1'
+ 
+ Puppet::Parser::Functions::newfunction(:fqdn_rand, :arity => -2, :type => :rvalue, :doc =>
+   "Generates random numbers based on the node's fqdn. Generated random values
+@@ -8,6 +8,6 @@ Puppet::Parser::Functions::newfunction(:fqdn_rand, :arity => -2, :type => :rvalu
+       $random_number = fqdn_rand(30)
+       $random_number_seed = fqdn_rand(30,30)") do |args|
+     max = args.shift.to_i
+-    srand(Digest::MD5.hexdigest([self['::fqdn'],args].join(':')).hex)
++    srand(Digest::SHA1.hexdigest([self['::fqdn'],args].join(':')).hex)
+     rand(max).to_s
+ end
+diff --git a/lib/puppet/parser/functions/md5.rb b/lib/puppet/parser/functions/md5.rb
+index d9e1ee8..bdcf77e 100644
+--- a/lib/puppet/parser/functions/md5.rb
++++ b/lib/puppet/parser/functions/md5.rb
+@@ -1,5 +1,5 @@
+-require 'digest/md5'
++require 'digest/sha1'
+ 
+ Puppet::Parser::Functions::newfunction(:md5, :type => :rvalue, :arity => 1, :doc => "Returns a MD5 hash value from a provided string.") do |args|
+-      Digest::MD5.hexdigest(args[0])
++      Digest::SHA1.hexdigest(args[0])
+ end
+diff --git a/lib/puppet/type/file.rb b/lib/puppet/type/file.rb
+index cb726cf..e3c32cb 100644
+--- a/lib/puppet/type/file.rb
++++ b/lib/puppet/type/file.rb
+@@ -1,4 +1,4 @@
+-require 'digest/md5'
++require 'digest/sha1'
+ require 'cgi'
+ require 'etc'
+ require 'uri'
+@@ -577,7 +577,7 @@ Puppet::Type.newtype(:file) do
+       end
+       children[meta.relative_path] ||= newchild(meta.relative_path)
+       children[meta.relative_path][:source] = meta.source
+-      children[meta.relative_path][:checksum] = :md5 if meta.ftype == "file"
++      children[meta.relative_path][:checksum] = :sha1 if meta.ftype == "file"
+ 
+       children[meta.relative_path].parameter(:source).metadata = meta
+     end
+diff --git a/lib/puppet/type/file/checksum.rb b/lib/puppet/type/file/checksum.rb
+index 3fd37d4..bca88ec 100755
+--- a/lib/puppet/type/file/checksum.rb
++++ b/lib/puppet/type/file/checksum.rb
+@@ -7,25 +7,25 @@ Puppet::Type.type(:file).newparam(:checksum) do
+ 
+   desc "The checksum type to use when determining whether to replace a file's contents.
+ 
+-    The default checksum type is md5."
++    The default checksum type is sha1."
+ 
+-  newvalues "md5", "md5lite", "mtime", "ctime", "none"
++  newvalues "sha1", "sha1lite", "mtime", "ctime", "none"
+ 
+-  defaultto :md5
++  defaultto :sha1
+ 
+   def sum(content)
+-    type = value || :md5 # because this might be called before defaults are set
++    type = value || :sha1 # because this might be called before defaults are set
+     "{#{type}}" + send(type, content)
+   end
+ 
+   def sum_file(path)
+-    type = value || :md5 # because this might be called before defaults are set
++    type = value || :sha1 # because this might be called before defaults are set
+     method = type.to_s + "_file"
+     "{#{type}}" + send(method, path).to_s
+   end
+ 
+   def sum_stream(&block)
+-    type = value || :md5 # same comment as above
++    type = value || :sha1 # same comment as above
+     method = type.to_s + "_stream"
+     checksum = send(method, &block)
+     "{#{type}}#{checksum}"
+diff --git a/lib/puppet/util/checksums.rb b/lib/puppet/util/checksums.rb
+index a505bfc..f60246a 100644
+--- a/lib/puppet/util/checksums.rb
++++ b/lib/puppet/util/checksums.rb
+@@ -1,4 +1,3 @@
+-require 'digest/md5'
+ require 'digest/sha1'
+ 
+ # A stand-alone module for calculating checksums
+@@ -27,7 +26,7 @@ module Puppet::Util::Checksums
+ 
+   # Calculate a checksum using Digest::MD5.
+   def md5(content)
+-    Digest::MD5.hexdigest(content)
++    Digest::SHA1.hexdigest(content)
+   end
+ 
+   # Calculate a checksum of the first 500 chars of the content using Digest::MD5.
+@@ -37,7 +36,7 @@ module Puppet::Util::Checksums
+ 
+   # Calculate a checksum of a file's content using Digest::MD5.
+   def md5_file(filename, lite = false)
+-    digest = Digest::MD5.new
++    digest = Digest::SHA1.new
+     checksum_file(digest, filename,  lite)
+   end
+ 
+@@ -47,7 +46,7 @@ module Puppet::Util::Checksums
+   end
+ 
+   def md5_stream(&block)
+-    digest = Digest::MD5.new
++    digest = Digest::SHA1.new
+     yield digest
+     digest.hexdigest
+   end

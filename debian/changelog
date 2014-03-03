@@ -1,3 +1,9 @@
+puppet (3.1.1-1puppetlabs1pexip6) pexip; urgency=low
+
+  * Remove MD5.
+
+ -- John-Mark Bell <jmb@pexip.com>  Mon, 13 Jan 2014 13:38:49 +0000
+
 puppet (3.1.1-1puppetlabs1pexip5) pexip; urgency=low
 
   * Add patch to handle PexOS.

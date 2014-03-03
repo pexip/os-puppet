@@ -1,2 +1,3 @@
 01-puppet-time.patch
 02-pexos.patch
+03-no-md5.patch
