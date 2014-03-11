@@ -1,8 +1,15 @@
+puppet (3.1.1-1puppetlabs1pexip7) pexip; urgency=low
+
+  * Prevent new puppetmaster starting if upgrading
+    from a version older than 3.1.1-1puppetlabs1pexip6.
+
+ -- John-Mark Bell <jmb@pexip.com>  Tue, 11 Mar 2014 11:52:35 +0000
+
 puppet (3.1.1-1puppetlabs1pexip6) pexip; urgency=low
 
   * Remove MD5.
 
- -- John-Mark Bell <jmb@pexip.com>  Mon, 13 Jan 2014 13:38:49 +0000
+ -- John-Mark Bell <jmb@pexip.com>  Mon, 03 Mar 2014 13:38:49 +0000
 
 puppet (3.1.1-1puppetlabs1pexip5) pexip; urgency=low
 
