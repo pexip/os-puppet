@@ -20,7 +20,7 @@ fi
 if [ "$1" = "configure" ]; then
     # If we're upgrading from a version of puppetmaster before we
     # forced it to use SHA1, then don't start the new version.
-    if [ -n "$2" ] && dpkg --compare-versions "$2" lt 3.1.1-1puppetlabs1pexip6 2>/dev/null; then
+    if [ -n "$2" ] && dpkg --compare-versions "$2" lt 3.1.1-1puppetlabs1pexip8 2>/dev/null; then
         if [ ! -e "/etc/init/puppetmaster.conf" ]; then
             update-rc.d puppetmaster defaults >/dev/null
         fi

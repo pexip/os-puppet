@@ -21,7 +21,7 @@ if [ "$1" = "configure" ]; then
 		puppet cert generate $(puppet master --configprint certname)
 	fi
         # Setup apache2 configuration files
-        APACHE2_SITE_FILE="/etc/apache2/sites-available/puppetmaster" 
+        APACHE2_SITE_FILE="/etc/apache2/sites-available/puppetmaster.conf" 
         if  [ ! -e "${APACHE2_SITE_FILE}" ]; then
             cp /usr/share/puppetmaster-passenger/apache2.site.conf.tmpl "${APACHE2_SITE_FILE}"
             # Fix path to SSL files
@@ -49,8 +49,8 @@ if [ "$1" = "configure" ]; then
     fi
     # Fix CRL file on upgrade to use the CA crl file instead of the host crl.
     if dpkg --compare-versions "$2" lt-nl "2.6.1-1"; then
-        if [ -e /etc/apache2/sites-available/puppetmaster ]; then
-            sed -r -i 's|SSLCARevocationFile[[:space:]]+/var/lib/puppet/ssl/crl.pem$|SSLCARevocationFile /var/lib/puppet/ssl/ca/ca_crl.pem|' /etc/apache2/sites-available/puppetmaster
+        if [ -e /etc/apache2/sites-available/puppetmaster.conf ]; then
+            sed -r -i 's|SSLCARevocationFile[[:space:]]+/var/lib/puppet/ssl/crl.pem$|SSLCARevocationFile /var/lib/puppet/ssl/ca/ca_crl.pem|' /etc/apache2/sites-available/puppetmaster.conf
             if [ -x "/etc/init.d/apache2" ]; then
                 # Seems that a restart is needed. reload breaks ssl apparently.
                 if [ -x "`which invoke-rc.d 2>/dev/null`" ]; then

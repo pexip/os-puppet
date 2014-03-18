@@ -7,7 +7,7 @@ case "$1" in
 	    dpkg-statoverride --remove /usr/share/puppet/rack/puppetmasterd/config.ru
 	fi
 	# Remove the puppetmaster site configuration on purge
-	rm -f /etc/apache2/sites-available/puppetmaster
+	rm -f /etc/apache2/sites-available/puppetmaster.conf
 	;;
     remove)
         # Disable the puppetmaster apache2 site configuration on package removal
