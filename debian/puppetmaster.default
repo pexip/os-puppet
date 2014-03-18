@@ -5,7 +5,7 @@
 # Setting this to "no" keeps the puppet master service from running.
 #
 # If you are using Passenger, you should have this set to "no."
-START=yes
+START=no
 
 # Startup options
 DAEMON_OPTS=""

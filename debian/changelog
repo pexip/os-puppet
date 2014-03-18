@@ -1,3 +1,9 @@
+puppet (3.1.1-1puppetlabs1pexip9) pexip; urgency=low
+
+  * Further modifications for passenger use.
+
+ -- Alan Ford <alan@pexip.com>  Tue, 18 Mar 2014 19:01:02 +0000
+
 puppet (3.1.1-1puppetlabs1pexip8) pexip; urgency=low
 
   * Update puppetmaster-passenger for Apache 2.4.
