@@ -1,3 +1,9 @@
+puppet (3.1.1-1puppetlabs1pexip10) pexip; urgency=low
+
+  * Yet more puppetmaster-passenger postinst modifications.
+
+ -- Alan Ford <alan@pexip.com>  Wed, 19 Mar 2014 12:33:32 +0000
+
 puppet (3.1.1-1puppetlabs1pexip9) pexip; urgency=low
 
   * Further modifications for passenger use.

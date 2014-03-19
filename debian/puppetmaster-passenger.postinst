@@ -8,17 +8,16 @@ if [ "$1" = "configure" ]; then
     # because passenger will suid to that user, see #577366
     if ! dpkg-statoverride --list /usr/share/puppet/rack/puppetmasterd/config.ru >/dev/null 2>&1
     then
-	dpkg-statoverride --update --add puppet puppet 0644 /usr/share/puppet/rack/puppetmasterd/config.ru
+        dpkg-statoverride --update --add puppet puppet 0644 /usr/share/puppet/rack/puppetmasterd/config.ru
     fi
 
     # Setup apache2 configuration files
     APACHE2_SITE_FILE="/etc/apache2/sites-available/puppetmaster.conf" 
-    if  [ ! -e "${APACHE2_SITE_FILE}" ]; then
-        cp /usr/share/puppetmaster-passenger/apache2.site.conf.tmpl "${APACHE2_SITE_FILE}"
-    fi
-
-    # Fix path to SSL files
     if [ -e "$(puppet master --configprint hostcert)" ]; then
+        # Start from known template
+        cp /usr/share/puppetmaster-passenger/apache2.site.conf.tmpl "${APACHE2_SITE_FILE}"
+
+        # Fix path to SSL files
         sed -r -i "s|(SSLCertificateFile\s+).+$|\1$(puppet master --configprint hostcert)|" "${APACHE2_SITE_FILE}"
         sed -r -i "s|(SSLCertificateKeyFile\s+).+$|\1$(puppet master --configprint hostprivkey)|" "${APACHE2_SITE_FILE}"
         sed -r -i "s|(SSLCACertificateFile\s+).+$|\1$(puppet master --configprint localcacert)|" "${APACHE2_SITE_FILE}"
@@ -28,21 +27,18 @@ if [ "$1" = "configure" ]; then
         # Fix path to rack docroot and directory
         sed -r -i "s|DocumentRoot /etc/puppet/rack/public|DocumentRoot /usr/share/puppet/rack/puppetmasterd/public|g" "${APACHE2_SITE_FILE}"
         sed -r -i "s|<Directory /etc/puppet/rack/>|<Directory /usr/share/puppet/rack/puppetmasterd/>|g" "${APACHE2_SITE_FILE}"
-    fi
 
-    # Setup passenger configuration
-    if [ "$2" = "" ]; then
         a2enmod ssl
         a2enmod headers
         a2ensite puppetmaster
-    fi
 
-    if [ -x "/etc/init.d/apache2" ]; then
-        # Seems that a restart is needed. reload breaks ssl apparently.
-        if [ -x "`which invoke-rc.d 2>/dev/null`" ]; then
-            invoke-rc.d apache2 restart || exit $?
-        else
-            /etc/init.d/apache2 restart || exit $?
+        if [ -x "/etc/init.d/apache2" ]; then
+            # Seems that a restart is needed. reload breaks ssl apparently.
+            if [ -x "`which invoke-rc.d 2>/dev/null`" ]; then
+                invoke-rc.d apache2 restart || exit $?
+            else
+                /etc/init.d/apache2 restart || exit $?
+            fi
         fi
     fi
 
