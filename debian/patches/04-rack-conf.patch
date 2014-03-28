@@ -1,0 +1,22 @@
+diff --git a/ext/rack/files/apache2.conf b/ext/rack/files/apache2.conf
+index 59bbd15..fc63477 100644
+--- a/ext/rack/files/apache2.conf
++++ b/ext/rack/files/apache2.conf
+@@ -13,7 +13,7 @@ Listen 8140
+ <VirtualHost *:8140>
+         SSLEngine on
+         SSLProtocol -ALL +SSLv3 +TLSv1
+-        SSLCipherSuite ALL:!ADH:RC4+RSA:+HIGH:+MEDIUM:-LOW:-SSLv2:-EXP
++        SSLCipherSuite HIGH:MEDIUM:!aNULL:!MD5
+ 
+         SSLCertificateFile      /etc/puppet/ssl/certs/squigley.namespace.at.pem
+         SSLCertificateKeyFile   /etc/puppet/ssl/private_keys/squigley.namespace.at.pem
+@@ -34,6 +34,8 @@ Listen 8140
+         RequestHeader set X-Client-DN %{SSL_CLIENT_S_DN}e
+         RequestHeader set X-Client-Verify %{SSL_CLIENT_VERIFY}e
+ 
++        KeepAlive off
++
+         DocumentRoot /etc/puppet/rack/public/
+         RackBaseURI /
+         <Directory /etc/puppet/rack/>

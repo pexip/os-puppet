@@ -1,3 +1,9 @@
+puppet (3.1.1-1puppetlabs1pexip11) pexip; urgency=low
+
+  * Disable KeepAlives in Apache config.
+
+ -- Alan Ford <alan@pexip.com>  Fri, 28 Mar 2014 13:40:22 +0000
+
 puppet (3.1.1-1puppetlabs1pexip10) pexip; urgency=low
 
   * Yet more puppetmaster-passenger postinst modifications.
