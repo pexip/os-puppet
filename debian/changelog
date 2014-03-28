@@ -1,3 +1,9 @@
+puppet (3.1.1-1puppetlabs1pexip12) pexip; urgency=low
+
+  * Correct Apache SSL config.
+
+ -- Alan Ford <alan@pexip.com>  Fri, 28 Mar 2014 16:24:02 +0000
+
 puppet (3.1.1-1puppetlabs1pexip11) pexip; urgency=low
 
   * Disable KeepAlives in Apache config.

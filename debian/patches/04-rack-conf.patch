@@ -1,13 +1,15 @@
 diff --git a/ext/rack/files/apache2.conf b/ext/rack/files/apache2.conf
-index 59bbd15..fc63477 100644
+index 59bbd15..7438814 100644
 --- a/ext/rack/files/apache2.conf
 +++ b/ext/rack/files/apache2.conf
-@@ -13,7 +13,7 @@ Listen 8140
+@@ -12,8 +12,8 @@ Listen 8140
+ 
  <VirtualHost *:8140>
          SSLEngine on
-         SSLProtocol -ALL +SSLv3 +TLSv1
+-        SSLProtocol -ALL +SSLv3 +TLSv1
 -        SSLCipherSuite ALL:!ADH:RC4+RSA:+HIGH:+MEDIUM:-LOW:-SSLv2:-EXP
-+        SSLCipherSuite HIGH:MEDIUM:!aNULL:!MD5
++        SSLProtocol -ALL +TLSv1.1 +TLSv1.2
++        SSLCipherSuite !eNULL:!aNULL:!EXP:!DES:!RC4:!RC2:!IDEA:!MD5:!ADH:ALL@STRENGTH
  
          SSLCertificateFile      /etc/puppet/ssl/certs/squigley.namespace.at.pem
          SSLCertificateKeyFile   /etc/puppet/ssl/private_keys/squigley.namespace.at.pem
