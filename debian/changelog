@@ -1,3 +1,9 @@
+puppet (3.1.1-1puppetlabs1pexip13) pexip; urgency=low
+
+  * Update for Passenger 4.x.y
+
+ -- John-Mark Bell <jmb@pexip.com>  Mon, 19 May 2014 23:10:14 +0100
+
 puppet (3.1.1-1puppetlabs1pexip12) pexip; urgency=low
 
   * Correct Apache SSL config.

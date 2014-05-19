@@ -2,7 +2,14 @@ diff --git a/ext/rack/files/apache2.conf b/ext/rack/files/apache2.conf
 index 59bbd15..7438814 100644
 --- a/ext/rack/files/apache2.conf
 +++ b/ext/rack/files/apache2.conf
-@@ -12,8 +12,8 @@ Listen 8140
+@@ -5,15 +5,13 @@ PassengerMaxPoolSize 12
+ PassengerPoolIdleTime 1500
+ # PassengerMaxRequests 1000
+ PassengerStatThrottleRate 120
+-RackAutoDetect Off
+-RailsAutoDetect Off
+ 
+ Listen 8140
  
  <VirtualHost *:8140>
          SSLEngine on
@@ -13,12 +20,15 @@ index 59bbd15..7438814 100644
  
          SSLCertificateFile      /etc/puppet/ssl/certs/squigley.namespace.at.pem
          SSLCertificateKeyFile   /etc/puppet/ssl/private_keys/squigley.namespace.at.pem
-@@ -34,6 +34,8 @@ Listen 8140
+@@ -34,8 +34,10 @@ Listen 8140
          RequestHeader set X-Client-DN %{SSL_CLIENT_S_DN}e
          RequestHeader set X-Client-Verify %{SSL_CLIENT_VERIFY}e
  
 +        KeepAlive off
 +
          DocumentRoot /etc/puppet/rack/public/
-         RackBaseURI /
+-        RackBaseURI /
++        PassengerBaseURI /
          <Directory /etc/puppet/rack/>
+                 Options None
+                 AllowOverride None
