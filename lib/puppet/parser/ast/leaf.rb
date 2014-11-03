@@ -131,7 +131,13 @@ class Puppet::Parser::AST
 
     def evaluate_container(scope)
       container = variable.respond_to?(:evaluate) ? variable.safeevaluate(scope) : variable
-      (container.is_a?(Hash) or container.is_a?(Array)) ? container : scope[container, {:file => file, :line => line}]
+      if container.is_a?(Hash) || container.is_a?(Array)
+        container
+      elsif container.is_a?(::String)
+        scope[container, {:file => file, :line => line}]
+      else
+        raise Puppet::ParseError, "#{variable} is #{container.inspect}, not a hash or array"
+      end
     end
 
     def evaluate_key(scope)
@@ -140,7 +146,7 @@ class Puppet::Parser::AST
 
     def array_index_or_key(object, key)
       if object.is_a?(Array)
-        raise Puppet::ParserError, "#{key} is not an integer, but is used as an index of an array" unless key = Puppet::Parser::Scope.number?(key)
+        raise Puppet::ParseError, "#{key} is not an integer, but is used as an index of an array" unless key = Puppet::Parser::Scope.number?(key)
       end
       key
     end
@@ -148,10 +154,10 @@ class Puppet::Parser::AST
     def evaluate(scope)
       object = evaluate_container(scope)
       accesskey = evaluate_key(scope)
+      raise Puppet::ParseError, "#{variable} is not a hash or array when accessing it with #{accesskey}" unless object.is_a?(Hash) or object.is_a?(Array)
 
-      raise Puppet::ParseError, "#{variable} is not an hash or array when accessing it with #{accesskey}" unless object.is_a?(Hash) or object.is_a?(Array)
-
-      object[array_index_or_key(object, accesskey)] || :undef
+      result = object[array_index_or_key(object, accesskey)]
+      result.nil? ? :undef : result
     end
 
     # Assign value to this hashkey or array index
@@ -163,12 +169,27 @@ class Puppet::Parser::AST
         raise Puppet::ParseError, "Assigning to the hash '#{variable}' with an existing key '#{accesskey}' is forbidden"
       end
 
+      mutation_deprecation()
+
       # assign to hash or array
       object[array_index_or_key(object, accesskey)] = value
     end
 
     def to_s
       "\$#{variable.to_s}[#{key.to_s}]"
+    end
+
+    def mutation_deprecation
+      deprecation_location_text =
+      if file && line
+        " at #{file}:#{line}"
+      elsif file
+        " in file #{file}"
+      elsif line
+        " at #{line}"
+      end
+      Puppet.warning(["The use of mutating operations on Array/Hash is deprecated#{deprecation_location_text}.",
+         " See http://links.puppetlabs.com/puppet-mutation-deprecation"].join(''))
     end
   end
 

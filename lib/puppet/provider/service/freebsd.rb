@@ -27,24 +27,24 @@ Puppet::Type.type(:service).provide :freebsd, :parent => :init do
     rcvar
   end
 
+  # Extract value name from service or rcvar
+  def extract_value_name(name, rc_index, regex, regex_index)
+    value_name = self.rcvar[rc_index]
+    self.error("No #{name} name found in rcvar") if value_name.nil?
+    value_name = value_name.gsub!(regex, regex_index)
+    self.error("#{name} name is empty") if value_name.nil?
+    self.debug("#{name} name is #{value_name}")
+    value_name
+  end
+
   # Extract service name
   def service_name
-    name = self.rcvar[0]
-    self.error("No service name found in rcvar") if name.nil?
-    name = name.gsub!(/# (.*)/, '\1')
-    self.error("Service name is empty") if name.nil?
-    self.debug("Service name is #{name}")
-    name
+    extract_value_name('service', 0, /# (.*)/, '\1')
   end
 
   # Extract rcvar name
   def rcvar_name
-    name = self.rcvar[1]
-    self.error("No rcvar name found in rcvar") if name.nil?
-    name = name.gsub!(/(.*)(_enable)?=(.*)/, '\1')
-    self.error("rcvar name is empty") if name.nil?
-    self.debug("rcvar name is #{name}")
-    name
+    extract_value_name('rcvar', 1, /(.*?)(_enable)?=(.*)/, '\1')
   end
 
   # Extract rcvar value
@@ -71,9 +71,9 @@ Puppet::Type.type(:service).provide :freebsd, :parent => :init do
     success = false
     # Replace in all files, not just in the first found with a match
     [rcconf, rcconf_local, rcconf_dir + "/#{service}"].each do |filename|
-      if File.exists?(filename)
+      if Puppet::FileSystem.exist?(filename)
         s = File.read(filename)
-        if s.gsub!(/(#{rcvar}(_enable)?)=\"?(YES|NO)\"?/, "\\1=\"#{yesno}\"")
+        if s.gsub!(/^(#{rcvar}(_enable)?)=\"?(YES|NO)\"?/, "\\1=\"#{yesno}\"")
           File.open(filename, File::WRONLY) { |f| f << s }
           self.debug("Replaced in #{filename}")
           success = true
@@ -87,14 +87,14 @@ Puppet::Type.type(:service).provide :freebsd, :parent => :init do
   def rc_add(service, rcvar, yesno)
     append = "\# Added by Puppet\n#{rcvar}_enable=\"#{yesno}\"\n"
     # First, try the one-file-per-service style
-    if File.exists?(rcconf_dir)
+    if Puppet::FileSystem.exist?(rcconf_dir)
       File.open(rcconf_dir + "/#{service}", File::WRONLY | File::APPEND | File::CREAT, 0644) {
         |f| f << append
         self.debug("Appended to #{f.path}")
       }
     else
       # Else, check the local rc file first, but don't create it
-      if File.exists?(rcconf_local)
+      if Puppet::FileSystem.exist?(rcconf_local)
         File.open(rcconf_local, File::WRONLY | File::APPEND) {
           |f| f << append
           self.debug("Appended to #{f.path}")

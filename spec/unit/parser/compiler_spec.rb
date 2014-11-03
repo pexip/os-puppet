@@ -1,5 +1,6 @@
-#! /usr/bin/env ruby
 require 'spec_helper'
+require 'puppet_spec/compiler'
+require 'matchers/resource'
 
 class CompilerTestResource
   attr_accessor :builtin, :virtual, :evaluated, :type, :title
@@ -52,6 +53,7 @@ end
 
 describe Puppet::Parser::Compiler do
   include PuppetSpec::Files
+  include Matchers::Resource
 
   def resource(type, title)
     Puppet::Parser::Resource.new(type, title, :scope => @scope)
@@ -65,13 +67,15 @@ describe Puppet::Parser::Compiler do
     now = Time.now
     Time.stubs(:now).returns(now)
 
-    @node = Puppet::Node.new("testnode", :facts => Puppet::Node::Facts.new("facts", {}))
-    @known_resource_types = Puppet::Resource::TypeCollection.new "development"
+    environment = Puppet::Node::Environment.create(:testing, [])
+    @node = Puppet::Node.new("testnode",
+                             :facts => Puppet::Node::Facts.new("facts", {}),
+                             :environment => environment)
+    @known_resource_types = environment.known_resource_types
     @compiler = Puppet::Parser::Compiler.new(@node)
     @scope = Puppet::Parser::Scope.new(@compiler, :source => stub('source'))
     @scope_resource = Puppet::Parser::Resource.new(:file, "/my/file", :scope => @scope)
     @scope.resource = @scope_resource
-    @compiler.environment.stubs(:known_resource_types).returns @known_resource_types
   end
 
   it "should have a class method that compiles, converts, and returns a catalog" do
@@ -94,6 +98,13 @@ describe Puppet::Parser::Compiler do
     @compiler.environment.should equal(@node.environment)
   end
 
+  it "fails if the node's environment has conflicting manifest settings" do
+    conflicted_environment = Puppet::Node::Environment.create(:testing, [], '/some/environment.conf/manifest.pp')
+    conflicted_environment.stubs(:conflicting_manifest_settings?).returns(true)
+    @node.environment = conflicted_environment
+    expect { Puppet::Parser::Compiler.compile(@node) }.to raise_error(Puppet::Error, /disable_per_environment_manifest.*true.*environment.conf.*manifest.*conflict/)
+  end
+
   it "should include the resource type collection helper" do
     Puppet::Parser::Compiler.ancestors.should be_include(Puppet::Resource::TypeCollectionHelper)
   end
@@ -106,22 +117,20 @@ describe Puppet::Parser::Compiler do
     @compiler.classlist.sort.should == %w{one two}.sort
   end
 
-  it "should clear the thread local caches before compile" do
+  it "should clear the global caches before compile" do
     compiler = stub 'compiler'
     Puppet::Parser::Compiler.expects(:new).with(@node).returns compiler
     catalog = stub 'catalog'
     compiler.expects(:compile).returns catalog
     catalog.expects(:to_resource)
 
-    [:known_resource_types, :env_module_directories].each do |var|
-      Thread.current[var] = "rspec"
-    end
+    $known_resource_types = "rspec"
+    $env_module_directories = "rspec"
 
     Puppet::Parser::Compiler.compile(@node)
 
-    [:known_resource_types, :env_module_directories].each do |var|
-      Thread.current[var].should == nil
-    end
+    $known_resource_types = nil
+    $env_module_directories = nil
   end
 
   describe "when initializing" do
@@ -152,7 +161,7 @@ describe Puppet::Parser::Compiler do
 
     it "should transform node class hashes into a class list" do
       node = Puppet::Node.new("mynode")
-      node.classes = {'foo'=>{'one'=>'1'}, 'bar'=>{'two'=>'2'}}
+      node.classes = {'foo'=>{'one'=>'p1'}, 'bar'=>{'two'=>'p2'}}
       compiler = Puppet::Parser::Compiler.new(node)
 
       compiler.classlist.should =~ ['foo', 'bar']
@@ -218,26 +227,6 @@ describe Puppet::Parser::Compiler do
       @compiler.catalog.server_version.should == "3"
     end
 
-    it "should evaluate any existing classes named in the node" do
-      classes = %w{one two three four}
-      main = stub 'main'
-      one = stub 'one', :name => "one"
-      three = stub 'three', :name => "three"
-      @node.stubs(:name).returns("whatever")
-      @node.stubs(:classes).returns(classes)
-
-      @compiler.expects(:evaluate_classes).with(classes, @compiler.topscope)
-      @compiler.class.publicize_methods(:evaluate_node_classes) { @compiler.evaluate_node_classes }
-    end
-
-    it "should evaluate any parameterized classes named in the node" do
-      classes = {'foo'=>{'1'=>'one'}, 'bar'=>{'2'=>'two'}}
-      @node.stubs(:classes).returns(classes)
-      @compiler.expects(:evaluate_classes).with(classes, @compiler.topscope)
-      @compiler.compile
-    end
-
-
     it "should evaluate the main class if it exists" do
       compile_stub(:evaluate_main)
       main_class = @known_resource_types.add Puppet::Resource::Type.new(:hostclass, "")
@@ -259,12 +248,6 @@ describe Puppet::Parser::Compiler do
       (klass = @compiler.catalog.resource(:class, "")).should be_instance_of(Puppet::Parser::Resource)
 
       @compiler.catalog.edge?(stage, klass).should be_true
-    end
-
-    it "should evaluate any node classes" do
-      @node.stubs(:classes).returns(%w{one two three four})
-      @compiler.expects(:evaluate_classes).with(%w{one two three four}, @compiler.topscope)
-      @compiler.send(:evaluate_node_classes)
     end
 
     it "should evaluate all added collections" do
@@ -521,7 +504,7 @@ describe Puppet::Parser::Compiler do
         end
       }
 
-      @compiler.class.publicize_methods(:evaluate_collections) { @compiler.evaluate_collections }
+      @compiler.compile
     end
 
     it "should not fail when there are unevaluated resource collections that do not refer to specific resources" do
@@ -576,7 +559,7 @@ describe Puppet::Parser::Compiler do
     it "should raise an error when it can't find class" do
       klasses = {'foo'=>nil}
       @node.classes = klasses
-      @compiler.topscope.stubs(:find_hostclass).with('foo', {:assume_fqname => false}).returns(nil)
+      @compiler.topscope.expects(:find_hostclass).with('foo', {:assume_fqname => false}).returns(nil)
       lambda{ @compiler.compile }.should raise_error(Puppet::Error, /Could not find class foo for testnode/)
     end
   end
@@ -609,7 +592,7 @@ describe Puppet::Parser::Compiler do
       # Define the given class with default parameters
       def define_class(name, parameters)
         @node.classes[name] = parameters
-        klass = Puppet::Resource::Type.new(:hostclass, name, :arguments => {'1' => @ast_obj, '2' => @ast_obj})
+        klass = Puppet::Resource::Type.new(:hostclass, name, :arguments => {'p1' => @ast_obj, 'p2' => @ast_obj})
         @compiler.topscope.known_resource_types.add klass
       end
 
@@ -627,20 +610,20 @@ describe Puppet::Parser::Compiler do
       it "should provide default values for parameters that have no values specified" do
         define_class('foo', {})
         compile()
-        @catalog.resource(:class, 'foo')['1'].should == "foo"
+        @catalog.resource(:class, 'foo')['p1'].should == "foo"
       end
 
       it "should use any provided values" do
-        define_class('foo', {'1' => 'real_value'})
+        define_class('foo', {'p1' => 'real_value'})
         compile()
-        @catalog.resource(:class, 'foo')['1'].should == "real_value"
+        @catalog.resource(:class, 'foo')['p1'].should == "real_value"
       end
 
       it "should support providing some but not all values" do
-        define_class('foo', {'1' => 'real_value'})
+        define_class('foo', {'p1' => 'real_value'})
         compile()
-        @catalog.resource(:class, 'Foo')['1'].should == "real_value"
-        @catalog.resource(:class, 'Foo')['2'].should == "foo"
+        @catalog.resource(:class, 'Foo')['p1'].should == "real_value"
+        @catalog.resource(:class, 'Foo')['p2'].should == "foo"
       end
 
       it "should ensure each node class is in catalog and has appropriate tags" do
@@ -648,22 +631,22 @@ describe Puppet::Parser::Compiler do
         @node.classes = klasses
         ast_obj = Puppet::Parser::AST::String.new(:value => 'foo')
         klasses.each do |name|
-          klass = Puppet::Resource::Type.new(:hostclass, name, :arguments => {'1' => ast_obj, '2' => ast_obj})
+          klass = Puppet::Resource::Type.new(:hostclass, name, :arguments => {'p1' => ast_obj, 'p2' => ast_obj})
           @compiler.topscope.known_resource_types.add klass
         end
         catalog = @compiler.compile
 
         r2 = catalog.resources.detect {|r| r.title == 'Bar::Foo' }
-        r2.tags.should =~ ['bar::foo', 'class', 'bar', 'foo']
+        r2.tags.should == Puppet::Util::TagSet.new(['bar::foo', 'class', 'bar', 'foo'])
       end
     end
 
     it "should fail if required parameters are missing" do
-      klass = {'foo'=>{'1'=>'one'}}
+      klass = {'foo'=>{'a'=>'one'}}
       @node.classes = klass
-      klass = Puppet::Resource::Type.new(:hostclass, 'foo', :arguments => {'1' => nil, '2' => nil})
+      klass = Puppet::Resource::Type.new(:hostclass, 'foo', :arguments => {'a' => nil, 'b' => nil})
       @compiler.topscope.known_resource_types.add klass
-      lambda { @compiler.compile }.should raise_error(Puppet::ParseError, "Must pass 2 to Class[Foo]")
+      lambda { @compiler.compile }.should raise_error(Puppet::ParseError, "Must pass b to Class[Foo]")
     end
 
     it "should fail if invalid parameters are passed" do
@@ -671,7 +654,7 @@ describe Puppet::Parser::Compiler do
       @node.classes = klass
       klass = Puppet::Resource::Type.new(:hostclass, 'foo', :arguments => {})
       @compiler.topscope.known_resource_types.add klass
-      lambda { @compiler.compile }.should raise_error(Puppet::ParseError, "Invalid parameter 3")
+      lambda { @compiler.compile }.should raise_error(Puppet::ParseError, "Invalid parameter 3 on Class[Foo]")
     end
 
     it "should ensure class is in catalog without params" do
@@ -706,7 +689,7 @@ describe Puppet::Parser::Compiler do
     it "should skip classes that have already been evaluated" do
       @compiler.catalog.stubs(:tag)
 
-      @scope.stubs(:class_scope).with(@class).returns("something")
+      @scope.stubs(:class_scope).with(@class).returns(@scope)
 
       @compiler.expects(:add_resource).never
 
@@ -719,7 +702,7 @@ describe Puppet::Parser::Compiler do
     it "should skip classes previously evaluated with different capitalization" do
       @compiler.catalog.stubs(:tag)
       @scope.stubs(:find_hostclass).with("MyClass",{:assume_fqname => false}).returns(@class)
-      @scope.stubs(:class_scope).with(@class).returns("something")
+      @scope.stubs(:class_scope).with(@class).returns(@scope)
       @compiler.expects(:add_resource).never
       @resource.expects(:evaluate).never
       Puppet::Parser::Resource.expects(:new).never
@@ -787,6 +770,119 @@ describe Puppet::Parser::Compiler do
       node_resource.expects(:evaluate)
 
       @compiler.send(:evaluate_ast_node)
+    end
+  end
+
+  describe "when evaluating node classes" do
+    include PuppetSpec::Compiler
+
+    describe "when provided classes in array format" do
+      let(:node) { Puppet::Node.new('someone', :classes => ['something']) }
+
+      describe "when the class exists" do
+        it "should succeed if the class is already included" do
+          manifest = <<-MANIFEST
+          class something {}
+          include something
+          MANIFEST
+
+          catalog = compile_to_catalog(manifest, node)
+
+          catalog.resource('Class', 'Something').should_not be_nil
+        end
+
+        it "should evaluate the class without parameters if it's not already included" do
+          manifest = "class something {}"
+
+          catalog = compile_to_catalog(manifest, node)
+
+          catalog.resource('Class', 'Something').should_not be_nil
+        end
+      end
+
+      it "should fail if the class doesn't exist" do
+        expect { compile_to_catalog('', node) }.to raise_error(Puppet::Error, /Could not find class something/)
+      end
+    end
+
+    describe "when provided classes in hash format" do
+      describe "for classes without parameters" do
+        let(:node) { Puppet::Node.new('someone', :classes => {'something' => {}}) }
+
+        describe "when the class exists" do
+          it "should succeed if the class is already included" do
+            manifest = <<-MANIFEST
+            class something {}
+            include something
+            MANIFEST
+
+            catalog = compile_to_catalog(manifest, node)
+
+            catalog.resource('Class', 'Something').should_not be_nil
+          end
+
+          it "should evaluate the class if it's not already included" do
+            manifest = <<-MANIFEST
+            class something {}
+            MANIFEST
+
+            catalog = compile_to_catalog(manifest, node)
+
+            catalog.resource('Class', 'Something').should_not be_nil
+          end
+        end
+
+        it "should fail if the class doesn't exist" do
+          expect { compile_to_catalog('', node) }.to raise_error(Puppet::Error, /Could not find class something/)
+        end
+      end
+
+      describe "for classes with parameters" do
+        let(:node) { Puppet::Node.new('someone', :classes => {'something' => {'configuron' => 'defrabulated'}}) }
+
+        describe "when the class exists" do
+          it "should fail if the class is already included" do
+            manifest = <<-MANIFEST
+            class something($configuron=frabulated) {}
+            include something
+            MANIFEST
+
+            expect { compile_to_catalog(manifest, node) }.to raise_error(Puppet::Error, /Class\[Something\] is already declared/)
+          end
+
+          it "should evaluate the class if it's not already included" do
+            manifest = <<-MANIFEST
+            class something($configuron=frabulated) {}
+            MANIFEST
+
+            catalog = compile_to_catalog(manifest, node)
+
+            resource = catalog.resource('Class', 'Something')
+            resource['configuron'].should == 'defrabulated'
+          end
+        end
+
+        it "should fail if the class doesn't exist" do
+          expect { compile_to_catalog('', node) }.to raise_error(Puppet::Error, /Could not find class something/)
+        end
+
+        it 'evaluates classes declared with parameters before unparameterized classes' do
+          node = Puppet::Node.new('someone', :classes => { 'app::web' => {}, 'app' => { 'port' => 8080 } })
+          manifest = <<-MANIFEST
+          class app($port = 80) { }
+
+          class app::web($port = $app::port) inherits app {
+            notify { expected: message => "$port" }
+          }
+          MANIFEST
+
+          catalog = compile_to_catalog(manifest, node)
+
+          expect(catalog).to have_resource("Class[App]").with_parameter(:port, 8080)
+          expect(catalog).to have_resource("Class[App::Web]")
+          expect(catalog).to have_resource("Notify[expected]").with_parameter(:message, "8080")
+        end
+      end
     end
   end
 

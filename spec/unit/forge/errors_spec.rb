@@ -1,5 +1,5 @@
 require 'spec_helper'
-require 'puppet/forge/errors'
+require 'puppet/forge'
 
 describe Puppet::Forge::Errors do
   describe 'SSLVerifyError' do
@@ -36,6 +36,44 @@ Could not connect to http://fake.com:1111
     The error we caught said 'There was a problem'
     Check your network connection and try again
       EOS
+    end
+  end
+
+  describe 'ResponseError' do
+    subject { Puppet::Forge::Errors::ResponseError }
+    let(:response) { stub(:body => '{}', :code => '404', :message => "not found") }
+
+    context 'without message' do
+      let(:exception) { subject.new(:uri => 'http://fake.com:1111', :response => response, :input => 'user/module') }
+
+      it 'should return a valid single line error' do
+        exception.message.should == 'Request to Puppet Forge failed. Detail: 404 not found.'
+      end
+
+      it 'should return a valid multiline error' do
+        exception.multiline.should == <<-eos.chomp
+Request to Puppet Forge failed.
+  The server being queried was http://fake.com:1111
+  The HTTP response we received was '404 not found'
+        eos
+      end
+    end
+
+    context 'with message' do
+      let(:exception) { subject.new(:uri => 'http://fake.com:1111', :response => response, :input => 'user/module', :message => 'no such module') }
+
+      it 'should return a valid single line error' do
+        exception.message.should == 'Request to Puppet Forge failed. Detail: no such module / 404 not found.'
+      end
+
+      it 'should return a valid multiline error' do
+        exception.multiline.should == <<-eos.chomp
+Request to Puppet Forge failed.
+  The server being queried was http://fake.com:1111
+  The HTTP response we received was '404 not found'
+  The message we received said 'no such module'
+        eos
+      end
     end
   end
 

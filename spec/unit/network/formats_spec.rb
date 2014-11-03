@@ -9,7 +9,7 @@ class PsonTest
     string == other.string
   end
 
-  def self.from_pson(data)
+  def self.from_data_hash(data)
     new(data)
   end
 
@@ -26,6 +26,53 @@ class PsonTest
 end
 
 describe "Puppet Network Format" do
+  it "should include a msgpack format", :if => Puppet.features.msgpack? do
+    Puppet::Network::FormatHandler.format(:msgpack).should_not be_nil
+  end
+
+  describe "msgpack", :if => Puppet.features.msgpack? do
+    before do
+      @msgpack = Puppet::Network::FormatHandler.format(:msgpack)
+    end
+
+    it "should have its mime type set to application/x-msgpack" do
+      @msgpack.mime.should == "application/x-msgpack"
+    end
+
+    it "should have a weight of 20" do
+      @msgpack.weight.should == 20
+    end
+
+    it "should fail when one element does not have a from_data_hash" do
+      expect do
+        @msgpack.intern_multiple(Hash, MessagePack.pack(["foo"]))
+      end.to raise_error(NoMethodError)
+    end
+
+    it "should be able to serialize a catalog" do
+      cat = Puppet::Resource::Catalog.new('foo', Puppet::Node::Environment.create(:testing, []))
+      cat.add_resource(Puppet::Resource.new(:file, 'my_file'))
+      catunpack = MessagePack.unpack(cat.to_msgpack)
+      catunpack.should include(
+        "tags"=>[],
+        "name"=>"foo",
+        "version"=>nil,
+        "environment"=>"testing",
+        "edges"=>[],
+        "classes"=>[]
+      )
+      catunpack["resources"][0].should include(
+        "type"=>"File",
+        "title"=>"my_file",
+        "exported"=>false
+      )
+      catunpack["resources"][0]["tags"].should include(
+        "file",
+        "my_file"
+      )
+    end
+  end
+
   it "should include a yaml format" do
     Puppet::Network::FormatHandler.format(:yaml).should_not be_nil
   end
@@ -55,22 +102,39 @@ describe "Puppet Network Format" do
       @yaml.render_multiple(instances).should == "foo"
     end
 
-    it "should safely load YAML when interning" do
-      text = "foo"
-      YAML.expects(:safely_load).with("foo").returns "bar"
-      @yaml.intern(String, text).should == "bar"
+    it "should deserialize YAML" do
+      @yaml.intern(String, YAML.dump("foo")).should == "foo"
     end
 
-    it "should safely load YAML when interning multiples" do
-      text = "foo"
-      YAML.expects(:safely_load).with("foo").returns "bar"
-      @yaml.intern_multiple(String, text).should == "bar"
+    it "should deserialize symbols as strings" do
+      @yaml.intern(String, YAML.dump(:foo)).should == "foo"
+    end
+
+    it "should load from yaml when deserializing an array" do
+      text = YAML.dump(["foo"])
+      @yaml.intern_multiple(String, text).should == ["foo"]
+    end
+
+    it "fails intelligibly instead of calling to_pson with something other than a hash" do
+      expect do
+        @yaml.intern(Puppet::Node, '')
+      end.to raise_error(Puppet::Network::FormatHandler::FormatError, /did not contain a valid instance/)
+    end
+
+    it "fails intelligibly when intern_multiple is called and yaml doesn't decode to an array" do
+      expect do
+        @yaml.intern_multiple(Puppet::Node, '')
+      end.to raise_error(Puppet::Network::FormatHandler::FormatError, /did not contain a collection/)
+    end
+
+    it "fails intelligibly instead of calling to_pson with something other than a hash when interning multiple" do
+      expect do
+        @yaml.intern_multiple(Puppet::Node, YAML.dump(["hello"]))
+      end.to raise_error(Puppet::Network::FormatHandler::FormatError, /did not contain a valid instance/)
     end
   end
 
   describe "base64 compressed yaml", :if => Puppet.features.zlib? do
-    yaml = Puppet::Network::FormatHandler.format(:b64_zlib_yaml)
-
     before do
       @yaml = Puppet::Network::FormatHandler.format(:b64_zlib_yaml)
     end
@@ -108,29 +172,25 @@ describe "Puppet Network Format" do
       @yaml.render(instances).should == "bar"
     end
 
-    it "should intern by calling decode" do
-      text = "foo"
-      @yaml.expects(:decode).with("foo").returns "bar"
-      @yaml.intern(String, text).should == "bar"
+    it "should round trip data" do
+      @yaml.intern(String, @yaml.encode("foo")).should == "foo"
     end
 
-    it "should intern multiples by calling 'decode'" do
-      text = "foo"
-      @yaml.expects(:decode).with("foo").returns "bar"
-      @yaml.intern_multiple(String, text).should == "bar"
+    it "should round trip multiple data elements" do
+      data = @yaml.render_multiple(["foo", "bar"])
+      @yaml.intern_multiple(String, data).should == ["foo", "bar"]
     end
 
-    it "should decode by base64 decoding, uncompressing and safely Yaml loading" do
-      Base64.expects(:decode64).with("zorg").returns "foo"
-      Zlib::Inflate.expects(:inflate).with("foo").returns "baz"
-      YAML.expects(:safely_load).with("baz").returns "bar"
-      @yaml.decode("zorg").should == "bar"
+    it "should intern by base64 decoding, uncompressing and safely Yaml loading" do
+      input = Base64.encode64(Zlib::Deflate.deflate(YAML.dump("data in")))
+
+      @yaml.intern(String, input).should == "data in"
     end
 
-    it "should encode by compressing and base64 encoding" do
-      Zlib::Deflate.expects(:deflate).with("foo", Zlib::BEST_COMPRESSION).returns "bar"
-      Base64.expects(:encode64).with("bar").returns "baz"
-      @yaml.encode("foo").should == "baz"
+    it "should render by compressing and base64 encoding" do
+      output = @yaml.render("foo")
+
+      YAML.load(Zlib::Inflate.inflate(Base64.decode64(output))).should == "foo"
     end
 
     describe "when zlib is disabled" do
@@ -143,11 +203,11 @@ describe "Puppet Network Format" do
       end
 
       it "should refuse to encode" do
-        lambda{ @yaml.encode("foo") }.should raise_error
+        expect { @yaml.render("foo") }.to raise_error(Puppet::Error, /zlib library is not installed/)
       end
 
       it "should refuse to decode" do
-        lambda{ @yaml.decode("foo") }.should raise_error
+        expect { @yaml.intern(String, "foo") }.to raise_error(Puppet::Error, /zlib library is not installed/)
       end
     end
 
@@ -256,10 +316,10 @@ describe "Puppet Network Format" do
         @pson.render_multiple(instances).should == "foo"
       end
 
-      it "should intern by calling 'PSON.parse' on the text and then using from_pson to convert the data into an instance" do
+      it "should intern by calling 'PSON.parse' on the text and then using from_data_hash to convert the data into an instance" do
         text = "foo"
         PSON.expects(:parse).with("foo").returns("type" => "PsonTest", "data" => "foo")
-        PsonTest.expects(:from_pson).with("foo").returns "parsed_pson"
+        PsonTest.expects(:from_data_hash).with("foo").returns "parsed_pson"
         @pson.intern(PsonTest, text).should == "parsed_pson"
       end
 
@@ -267,23 +327,29 @@ describe "Puppet Network Format" do
         text = "foo"
         instance = PsonTest.new("foo")
         PSON.expects(:parse).with("foo").returns(instance)
-        PsonTest.expects(:from_pson).never
+        PsonTest.expects(:from_data_hash).never
         @pson.intern(PsonTest, text).should equal(instance)
       end
 
-      it "should intern by calling 'PSON.parse' on the text and then using from_pson to convert the actual into an instance if the pson has no class/data separation" do
+      it "should intern by calling 'PSON.parse' on the text and then using from_data_hash to convert the actual into an instance if the pson has no class/data separation" do
         text = "foo"
         PSON.expects(:parse).with("foo").returns("foo")
-        PsonTest.expects(:from_pson).with("foo").returns "parsed_pson"
+        PsonTest.expects(:from_data_hash).with("foo").returns "parsed_pson"
         @pson.intern(PsonTest, text).should == "parsed_pson"
       end
 
       it "should intern multiples by parsing the text and using 'class.intern' on each resulting data structure" do
         text = "foo"
         PSON.expects(:parse).with("foo").returns ["bar", "baz"]
-        PsonTest.expects(:from_pson).with("bar").returns "BAR"
-        PsonTest.expects(:from_pson).with("baz").returns "BAZ"
+        PsonTest.expects(:from_data_hash).with("bar").returns "BAR"
+        PsonTest.expects(:from_data_hash).with("baz").returns "BAZ"
         @pson.intern_multiple(PsonTest, text).should == %w{BAR BAZ}
+      end
+
+      it "fails intelligibly when given invalid data" do
+        expect do
+          @pson.intern(Puppet::Node, '')
+        end.to raise_error(PSON::ParserError, /source did not contain any PSON/)
       end
     end
   end
@@ -306,8 +372,8 @@ describe "Puppet Network Format" do
     end
 
     [[1, 2], ["one"], [{ 1 => 1 }]].each do |input|
-      it "should render #{input.inspect} as JSON" do
-        subject.render(input).should == json.render(input).chomp
+      it "should render #{input.inspect} as one item per line" do
+        subject.render(input).should == input.collect { |item| item.to_s + "\n" }.join('')
       end
     end
 

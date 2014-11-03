@@ -5,7 +5,8 @@ require 'puppet/resource'
 describe Puppet::Resource do
   include PuppetSpec::Files
 
-  let :basepath do make_absolute("/somepath") end
+  let(:basepath) { make_absolute("/somepath") }
+  let(:environment) { Puppet::Node::Environment.create(:testing, []) }
 
   [:catalog, :file, :line].each do |attr|
     it "should have an #{attr} attribute" do
@@ -84,6 +85,12 @@ describe Puppet::Resource do
     ref.title.should =="baz"
   end
 
+  it "should not interpret the title as a reference if the type is a non component or whit reference" do
+    ref = Puppet::Resource.new("Notify", "foo::bar[baz]")
+    ref.type.should == "Notify"
+    ref.title.should =="foo::bar[baz]"
+  end
+
   it "should be able to extract its information from a Puppet::Type instance" do
     ral = Puppet::Type.type(:file).new :path => basepath+"/foo"
     ref = Puppet::Resource.new(ral)
@@ -120,10 +127,6 @@ describe Puppet::Resource do
     resource.should be_exported
   end
 
-  it "should support an environment attribute" do
-    Puppet::Resource.new("file", "/my/file", :environment => :foo).environment.name.should == :foo
-  end
-
   describe "and munging its type and title" do
     describe "when modeling a builtin resource" do
       it "should be able to find the resource type" do
@@ -139,19 +142,19 @@ describe Puppet::Resource do
       describe "that exists" do
         before do
           @type = Puppet::Resource::Type.new(:definition, "foo::bar")
-          Puppet::Node::Environment.new.known_resource_types.add @type
+          environment.known_resource_types.add @type
         end
 
         it "should set its type to the capitalized type name" do
-          Puppet::Resource.new("foo::bar", "/my/file").type.should == "Foo::Bar"
+          Puppet::Resource.new("foo::bar", "/my/file", :environment => environment).type.should == "Foo::Bar"
         end
 
         it "should be able to find the resource type" do
-          Puppet::Resource.new("foo::bar", "/my/file").resource_type.should equal(@type)
+          Puppet::Resource.new("foo::bar", "/my/file", :environment => environment).resource_type.should equal(@type)
         end
 
         it "should set its title to the provided title" do
-          Puppet::Resource.new("foo::bar", "/my/file").title.should == "/my/file"
+          Puppet::Resource.new("foo::bar", "/my/file", :environment => environment).title.should == "/my/file"
         end
       end
 
@@ -179,15 +182,15 @@ describe Puppet::Resource do
       describe "that exists" do
         before do
           @type = Puppet::Resource::Type.new(:hostclass, "foo::bar")
-          Puppet::Node::Environment.new.known_resource_types.add @type
+          environment.known_resource_types.add @type
         end
 
         it "should set its title to the capitalized, fully qualified resource type" do
-          Puppet::Resource.new("class", "foo::bar").title.should == "Foo::Bar"
+          Puppet::Resource.new("class", "foo::bar", :environment => environment).title.should == "Foo::Bar"
         end
 
         it "should be able to find the resource type" do
-          Puppet::Resource.new("class", "foo::bar").resource_type.should equal(@type)
+          Puppet::Resource.new("class", "foo::bar", :environment => environment).resource_type.should equal(@type)
         end
       end
 
@@ -207,9 +210,9 @@ describe Puppet::Resource do
         describe "and a class exists whose name is the empty string" do # this was a bit tough to track down
           it "should set its title to :main" do
             @type = Puppet::Resource::Type.new(:hostclass, "")
-            Puppet::Node::Environment.new.known_resource_types.add @type
+            environment.known_resource_types.add @type
 
-            Puppet::Resource.new("class", "").title.should == :main
+            Puppet::Resource.new("class", "", :environment => environment).title.should == :main
           end
         end
       end
@@ -222,9 +225,9 @@ describe Puppet::Resource do
         describe "and a class exists whose name is the empty string" do # this was a bit tough to track down
           it "should set its title to :main" do
             @type = Puppet::Resource::Type.new(:hostclass, "")
-            Puppet::Node::Environment.new.known_resource_types.add @type
+            environment.known_resource_types.add @type
 
-            Puppet::Resource.new("class", :main).title.should == :main
+            Puppet::Resource.new("class", :main, :environment => environment).title.should == :main
           end
         end
       end
@@ -237,8 +240,8 @@ describe Puppet::Resource do
 
   it "should not fail when an invalid parameter is used and strict mode is disabled" do
     type = Puppet::Resource::Type.new(:definition, "foobar")
-    Puppet::Node::Environment.new.known_resource_types.add type
-    resource = Puppet::Resource.new("foobar", "/my/file")
+    environment.known_resource_types.add type
+    resource = Puppet::Resource.new("foobar", "/my/file", :environment => environment)
     resource[:yay] = true
   end
 
@@ -267,42 +270,45 @@ describe Puppet::Resource do
   end
 
   describe "when setting default parameters" do
-    before do
-      @scope = mock "Scope"
-      @scope.stubs(:source).returns(nil)
+    let(:foo_node) { Puppet::Node.new('foo', :environment => environment) }
+    let(:compiler) { Puppet::Parser::Compiler.new(foo_node) }
+    let(:scope)    { Puppet::Parser::Scope.new(compiler) }
+
+    def ast_string(value)
+      Puppet::Parser::AST::String.new({:value => value})
     end
 
     it "should fail when asked to set default values and it is not a parser resource" do
-      Puppet::Node::Environment.new.known_resource_types.add(
-        Puppet::Resource::Type.new(:definition, "default_param", :arguments => {"a" => Puppet::Parser::AST::String.new(:value => "default")})
+      environment.known_resource_types.add(
+      Puppet::Resource::Type.new(:definition, "default_param", :arguments => {"a" => ast_string("default")})
       )
-      resource = Puppet::Resource.new("default_param", "name")
-      lambda { resource.set_default_parameters(@scope) }.should raise_error(Puppet::DevError)
+      resource = Puppet::Resource.new("default_param", "name", :environment => environment)
+      lambda { resource.set_default_parameters(scope) }.should raise_error(Puppet::DevError)
     end
 
     it "should evaluate and set any default values when no value is provided" do
-      Puppet::Node::Environment.new.known_resource_types.add(
-        Puppet::Resource::Type.new(:definition, "default_param", :arguments => {"a" => Puppet::Parser::AST::String.new(:value => "a_default_value")})
+      environment.known_resource_types.add(
+        Puppet::Resource::Type.new(:definition, "default_param", :arguments => {"a" => ast_string("a_default_value")})
       )
-      resource = Puppet::Parser::Resource.new("default_param", "name", :scope => Puppet::Parser::Scope.new(Puppet::Parser::Compiler.new(Puppet::Node.new("foo"))))
-      resource.set_default_parameters(@scope)
+      resource = Puppet::Parser::Resource.new("default_param", "name", :scope => scope)
+      resource.set_default_parameters(scope)
       resource["a"].should == "a_default_value"
     end
 
     it "should skip attributes with no default value" do
-      Puppet::Node::Environment.new.known_resource_types.add(
-        Puppet::Resource::Type.new(:definition, "no_default_param", :arguments => {"a" => Puppet::Parser::AST::String.new(:value => "a_default_value")})
+      environment.known_resource_types.add(
+        Puppet::Resource::Type.new(:definition, "no_default_param", :arguments => {"a" => ast_string("a_default_value")})
       )
-      resource = Puppet::Parser::Resource.new("no_default_param", "name", :scope => Puppet::Parser::Scope.new(Puppet::Parser::Compiler.new(Puppet::Node.new("foo"))))
-      lambda { resource.set_default_parameters(@scope) }.should_not raise_error
+      resource = Puppet::Parser::Resource.new("no_default_param", "name", :scope => scope)
+      lambda { resource.set_default_parameters(scope) }.should_not raise_error
     end
 
     it "should return the list of default parameters set" do
-      Puppet::Node::Environment.new.known_resource_types.add(
-        Puppet::Resource::Type.new(:definition, "default_param", :arguments => {"a" => Puppet::Parser::AST::String.new(:value => "a_default_value")})
+      environment.known_resource_types.add(
+        Puppet::Resource::Type.new(:definition, "default_param", :arguments => {"a" => ast_string("a_default_value")})
       )
-      resource = Puppet::Parser::Resource.new("default_param", "name", :scope => Puppet::Parser::Scope.new(Puppet::Parser::Compiler.new(Puppet::Node.new("foo"))))
-      resource.set_default_parameters(@scope).should == ["a"]
+      resource = Puppet::Parser::Resource.new("default_param", "name", :scope => scope)
+      resource.set_default_parameters(scope).should == ["a"]
     end
 
     describe "when the resource type is :hostclass" do
@@ -312,29 +318,32 @@ describe Puppet::Resource do
       let(:apache) { Puppet::Resource::Type.new(:hostclass, 'apache', :arguments => { 'port' => port }) }
 
       before do
-        environment = Puppet::Node::Environment.new(environment_name)
         environment.known_resource_types.add(apache)
 
-        @scope.stubs(:host).returns('host')
-        @scope.stubs(:environment).returns(Puppet::Node::Environment.new(environment_name))
-        @scope.stubs(:facts).returns(Puppet::Node::Facts.new("facts", fact_values))
+        scope.stubs(:host).returns('host')
+        scope.stubs(:environment).returns(environment)
+        scope.stubs(:facts).returns(Puppet::Node::Facts.new("facts", fact_values))
       end
 
       context "when no value is provided" do
+        before(:each) do
+          Puppet[:binder] = true
+        end
+
         let(:resource) do
-          Puppet::Parser::Resource.new("class", "apache", :scope => @scope)
+          Puppet::Parser::Resource.new("class", "apache", :scope => scope)
         end
 
         it "should query the data_binding terminus using a namespaced key" do
           Puppet::DataBinding.indirection.expects(:find).with(
             'apache::port', all_of(has_key(:environment), has_key(:variables)))
-          resource.set_default_parameters(@scope)
+          resource.set_default_parameters(scope)
         end
 
         it "should use the value from the data_binding terminus" do
           Puppet::DataBinding.indirection.expects(:find).returns('443')
 
-          resource.set_default_parameters(@scope)
+          resource.set_default_parameters(scope)
 
           resource[:port].should == '443'
         end
@@ -342,10 +351,18 @@ describe Puppet::Resource do
         it "should use the default value if the data_binding terminus returns nil" do
           Puppet::DataBinding.indirection.expects(:find).returns(nil)
 
-          resource.set_default_parameters(@scope)
+          resource.set_default_parameters(scope)
 
           resource[:port].should == '80'
         end
+
+        it "should fail with error message about data binding on a hiera failure" do
+          Puppet::DataBinding.indirection.expects(:find).raises(Puppet::DataBinding::LookupError, 'Forgettabotit')
+          expect {
+            resource.set_default_parameters(scope)
+          }.to raise_error(Puppet::Error, /Error from DataBinding 'hiera' while looking up 'apache::port':.*Forgettabotit/)
+        end
+
       end
 
       context "when a value is provided" do
@@ -356,18 +373,25 @@ describe Puppet::Resource do
         end
 
         let(:resource) do
-          Puppet::Parser::Resource.new("class", "apache", :scope => @scope,
+          Puppet::Parser::Resource.new("class", "apache", :scope => scope,
             :parameters => [port_parameter])
         end
 
         it "should not query the data_binding terminus" do
           Puppet::DataBinding.indirection.expects(:find).never
-          resource.set_default_parameters(@scope)
+          resource.set_default_parameters(scope)
+        end
+
+        it "should not query the injector" do
+          # enable the injector
+          Puppet[:binder] = true
+          compiler.injector.expects(:find).never
+          resource.set_default_parameters(scope)
         end
 
         it "should use the value provided" do
           Puppet::DataBinding.indirection.expects(:find).never
-          resource.set_default_parameters(@scope).should == []
+          resource.set_default_parameters(scope).should == []
           resource[:port].should == '8080'
         end
       end
@@ -376,17 +400,17 @@ describe Puppet::Resource do
 
   describe "when validating all required parameters are present" do
     it "should be able to validate that all required parameters are present" do
-      Puppet::Node::Environment.new.known_resource_types.add(
+      environment.known_resource_types.add(
         Puppet::Resource::Type.new(:definition, "required_param", :arguments => {"a" => nil})
       )
-      lambda { Puppet::Resource.new("required_param", "name").validate_complete }.should raise_error(Puppet::ParseError)
+      lambda { Puppet::Resource.new("required_param", "name", :environment => environment).validate_complete }.should raise_error(Puppet::ParseError)
     end
 
     it "should not fail when all required parameters are present" do
-      Puppet::Node::Environment.new.known_resource_types.add(
+      environment.known_resource_types.add(
         Puppet::Resource::Type.new(:definition, "no_required_param")
       )
-      resource = Puppet::Resource.new("no_required_param", "name")
+      resource = Puppet::Resource.new("no_required_param", "name", :environment => environment)
       resource["a"] = "meh"
       lambda { resource.validate_complete }.should_not raise_error
     end
@@ -433,14 +457,14 @@ describe Puppet::Resource do
 
     it "should correctly detect when provided parameters are not valid for defined resource types" do
       type = Puppet::Resource::Type.new(:definition, "foobar")
-      Puppet::Node::Environment.new.known_resource_types.add type
-      Puppet::Resource.new("foobar", "/my/file").should_not be_valid_parameter("myparam")
+      environment.known_resource_types.add type
+      Puppet::Resource.new("foobar", "/my/file", :environment => environment).should_not be_valid_parameter("myparam")
     end
 
     it "should correctly detect when provided parameters are valid for defined resource types" do
       type = Puppet::Resource::Type.new(:definition, "foobar", :arguments => {"myparam" => nil})
-      Puppet::Node::Environment.new.known_resource_types.add type
-      Puppet::Resource.new("foobar", "/my/file").should be_valid_parameter("myparam")
+      environment.known_resource_types.add type
+      Puppet::Resource.new("foobar", "/my/file", :environment => environment).should be_valid_parameter("myparam")
     end
 
     it "should allow setting and retrieving of parameters" do
@@ -563,48 +587,41 @@ describe Puppet::Resource do
     end
   end
 
-  describe "when serializing" do
+  describe "when serializing a native type" do
     before do
       @resource = Puppet::Resource.new("file", "/my/file")
       @resource["one"] = "test"
       @resource["two"] = "other"
     end
 
-    it "should be able to be dumped to yaml" do
-      expect { YAML.dump(@resource) }.to_not raise_error
-    end
-
     it "should produce an equivalent yaml object" do
-      text = YAML.dump(@resource)
+      text = @resource.render('yaml')
 
-      newresource = YAML.load(text)
-      newresource.title.should == @resource.title
-      newresource.type.should == @resource.type
-      %w{one two}.each do |param|
-        newresource[param].should == @resource[param]
-      end
+      newresource = Puppet::Resource.convert_from('yaml', text)
+      newresource.should equal_resource_attributes_of @resource
     end
   end
 
-  describe "when loading 0.25.x storedconfigs YAML" do
-    before :each do
-      @old_storedconfig_yaml = %q{--- !ruby/object:Puppet::Resource::Reference
-builtin_type:
-title: /tmp/bar
-type: File
-}
+  describe "when serializing a defined type" do
+    before do
+      type = Puppet::Resource::Type.new(:definition, "foo::bar")
+      environment.known_resource_types.add type
+
+      @resource = Puppet::Resource.new('foo::bar', 'xyzzy', :environment => environment)
+      @resource['one'] = 'test'
+      @resource['two'] = 'other'
+      @resource.resource_type
     end
 
-    it "should deserialize a Puppet::Resource::Reference without exceptions" do
-      expect { YAML.load(@old_storedconfig_yaml) }.to_not raise_error
+    it "doesn't include transient instance variables (#4506)" do
+      expect(@resource.to_yaml_properties).to_not include :@rstype
     end
 
-    it "should deserialize as a Puppet::Resource::Reference as a Puppet::Resource" do
-      YAML.load(@old_storedconfig_yaml).class.should == Puppet::Resource
-    end
+    it "produces an equivalent yaml object" do
+      text = @resource.render('yaml')
 
-    it "should to_hash properly" do
-      YAML.load(@old_storedconfig_yaml).to_hash.should == { :path => "/tmp/bar" }
+      newresource = Puppet::Resource.convert_from('yaml', text)
+      newresource.should equal_resource_attributes_of @resource
     end
   end
 
@@ -660,45 +677,45 @@ type: File
     # trap the actual data structure then.
 
     it "should set its type to the provided type" do
-      Puppet::Resource.from_pson(PSON.parse(Puppet::Resource.new("File", "/foo").to_pson)).type.should == "File"
+      Puppet::Resource.from_data_hash(PSON.parse(Puppet::Resource.new("File", "/foo").to_pson)).type.should == "File"
     end
 
     it "should set its title to the provided title" do
-      Puppet::Resource.from_pson(PSON.parse(Puppet::Resource.new("File", "/foo").to_pson)).title.should == "/foo"
+      Puppet::Resource.from_data_hash(PSON.parse(Puppet::Resource.new("File", "/foo").to_pson)).title.should == "/foo"
     end
 
     it "should include all tags from the resource" do
       resource = Puppet::Resource.new("File", "/foo")
       resource.tag("yay")
 
-      Puppet::Resource.from_pson(PSON.parse(resource.to_pson)).tags.should == resource.tags
+      Puppet::Resource.from_data_hash(PSON.parse(resource.to_pson)).tags.should == resource.tags
     end
 
     it "should include the file if one is set" do
       resource = Puppet::Resource.new("File", "/foo")
       resource.file = "/my/file"
 
-      Puppet::Resource.from_pson(PSON.parse(resource.to_pson)).file.should == "/my/file"
+      Puppet::Resource.from_data_hash(PSON.parse(resource.to_pson)).file.should == "/my/file"
     end
 
     it "should include the line if one is set" do
       resource = Puppet::Resource.new("File", "/foo")
       resource.line = 50
 
-      Puppet::Resource.from_pson(PSON.parse(resource.to_pson)).line.should == 50
+      Puppet::Resource.from_data_hash(PSON.parse(resource.to_pson)).line.should == 50
     end
 
     it "should include the 'exported' value if one is set" do
       resource = Puppet::Resource.new("File", "/foo")
       resource.exported = true
 
-      Puppet::Resource.from_pson(PSON.parse(resource.to_pson)).exported.should be_true
+      Puppet::Resource.from_data_hash(PSON.parse(resource.to_pson)).exported?.should be_true
     end
 
     it "should set 'exported' to false if no value is set" do
       resource = Puppet::Resource.new("File", "/foo")
 
-      Puppet::Resource.from_pson(PSON.parse(resource.to_pson)).exported.should be_false
+      Puppet::Resource.from_data_hash(PSON.parse(resource.to_pson)).exported?.should be_false
     end
 
     it "should set all of its parameters as the 'parameters' entry" do
@@ -706,7 +723,7 @@ type: File
       resource[:foo] = %w{bar eh}
       resource[:fee] = %w{baz}
 
-      result = Puppet::Resource.from_pson(PSON.parse(resource.to_pson))
+      result = Puppet::Resource.from_data_hash(PSON.parse(resource.to_pson))
       result["foo"].should == %w{bar eh}
       result["fee"].should == %w{baz}
     end
@@ -714,14 +731,14 @@ type: File
     it "should serialize relationships as reference strings" do
       resource = Puppet::Resource.new("File", "/foo")
       resource[:requires] = Puppet::Resource.new("File", "/bar")
-      result = Puppet::Resource.from_pson(PSON.parse(resource.to_pson))
+      result = Puppet::Resource.from_data_hash(PSON.parse(resource.to_pson))
       result[:requires].should == "File[/bar]"
     end
 
     it "should serialize multiple relationships as arrays of reference strings" do
       resource = Puppet::Resource.new("File", "/foo")
       resource[:requires] = [Puppet::Resource.new("File", "/bar"), Puppet::Resource.new("File", "/baz")]
-      result = Puppet::Resource.from_pson(PSON.parse(resource.to_pson))
+      result = Puppet::Resource.from_data_hash(PSON.parse(resource.to_pson))
       result[:requires].should == [ "File[/bar]",  "File[/baz]" ]
     end
   end
@@ -739,66 +756,66 @@ type: File
     end
 
     it "should set its type to the provided type" do
-      Puppet::Resource.from_pson(@data).type.should == "File"
+      Puppet::Resource.from_data_hash(@data).type.should == "File"
     end
 
     it "should set its title to the provided title" do
-      Puppet::Resource.from_pson(@data).title.should == basepath+"/yay"
+      Puppet::Resource.from_data_hash(@data).title.should == basepath+"/yay"
     end
 
     it "should tag the resource with any provided tags" do
       @data['tags'] = %w{foo bar}
-      resource = Puppet::Resource.from_pson(@data)
+      resource = Puppet::Resource.from_data_hash(@data)
       resource.tags.should be_include("foo")
       resource.tags.should be_include("bar")
     end
 
     it "should set its file to the provided file" do
       @data['file'] = "/foo/bar"
-      Puppet::Resource.from_pson(@data).file.should == "/foo/bar"
+      Puppet::Resource.from_data_hash(@data).file.should == "/foo/bar"
     end
 
     it "should set its line to the provided line" do
       @data['line'] = 50
-      Puppet::Resource.from_pson(@data).line.should == 50
+      Puppet::Resource.from_data_hash(@data).line.should == 50
     end
 
     it "should 'exported' to true if set in the pson data" do
       @data['exported'] = true
-      Puppet::Resource.from_pson(@data).exported.should be_true
+      Puppet::Resource.from_data_hash(@data).exported.should be_true
     end
 
     it "should 'exported' to false if not set in the pson data" do
-      Puppet::Resource.from_pson(@data).exported.should be_false
+      Puppet::Resource.from_data_hash(@data).exported.should be_false
     end
 
     it "should fail if no title is provided" do
       @data.delete('title')
-      expect { Puppet::Resource.from_pson(@data) }.to raise_error(ArgumentError)
+      expect { Puppet::Resource.from_data_hash(@data) }.to raise_error(ArgumentError)
     end
 
     it "should fail if no type is provided" do
       @data.delete('type')
-      expect { Puppet::Resource.from_pson(@data) }.to raise_error(ArgumentError)
+      expect { Puppet::Resource.from_data_hash(@data) }.to raise_error(ArgumentError)
     end
 
     it "should set each of the provided parameters" do
       @data['parameters'] = {'foo' => %w{one two}, 'fee' => %w{three four}}
-      resource = Puppet::Resource.from_pson(@data)
+      resource = Puppet::Resource.from_data_hash(@data)
       resource['foo'].should == %w{one two}
       resource['fee'].should == %w{three four}
     end
 
     it "should convert single-value array parameters to normal values" do
       @data['parameters'] = {'foo' => %w{one}}
-      resource = Puppet::Resource.from_pson(@data)
+      resource = Puppet::Resource.from_data_hash(@data)
       resource['foo'].should == %w{one}
     end
   end
 
-  describe "it should implement to_resource" do
+  it "implements copy_as_resource" do
     resource = Puppet::Resource.new("file", "/my/file")
-    resource.to_resource.should == resource
+    resource.copy_as_resource.should == resource
   end
 
   describe "because it is an indirector model" do

@@ -2,7 +2,7 @@ require 'puppet/parameter/value'
 
 # A collection of values and regular expressions, used for specifying allowed values
 # in a given parameter.
-# @note This class is considered part of the internal implementation of {Puppet::Parameter}, and 
+# @note This class is considered part of the internal implementation of {Puppet::Parameter}, and
 #   {Puppet::Property} and the functionality provided by this class should be used via their interfaces.
 # @comment This class probably have several problems when trying to use it with a combination of
 #   regular expressions and aliases as it finds an acceptable value holder vi "name" which may be
@@ -33,17 +33,19 @@ class Puppet::Parameter::ValueCollection
     unless defined?(@doc)
       @doc = ""
       unless values.empty?
-        @doc += "  Valid values are "
-        @doc += @strings.collect do |value|
+        @doc << "Valid values are "
+        @doc << @strings.collect do |value|
           if aliases = value.aliases and ! aliases.empty?
             "`#{value.name}` (also called `#{aliases.join(", ")}`)"
           else
             "`#{value.name}`"
           end
-        end.join(", ") + "."
+        end.join(", ") << ". "
       end
 
-      @doc += "  Values can match `" + regexes.join("`, `") + "`." unless regexes.empty?
+      unless regexes.empty?
+        @doc << "Values can match `#{regexes.join("`, `")}`."
+      end
     end
 
     @doc
@@ -88,7 +90,7 @@ class Puppet::Parameter::ValueCollection
   end
 
   # Munges the value if it is valid, else produces the same value.
-  # @param value [Object] the value to munge 
+  # @param value [Object] the value to munge
   # @return [Object] the munged value, or the given value
   # @todo This method does not seem to do any munging. It just returns the value if it matches the
   #   regexp, or the (most likely Symbolic) allowed value if it matches (which is more of a replacement
@@ -123,6 +125,10 @@ class Puppet::Parameter::ValueCollection
   #   was possible to specify a value of `:before` or `:after` for the purpose of calling
   #   both the block and the provider. Use of these deprecated options will now raise an exception later
   #   in the process when the _is_ value is set (see Puppet::Property#set).
+  # @option options [Symbol] :invalidate_refreshes True if a change on this property should invalidate and
+  #   remove any scheduled refreshes (from notify or subscribe) targeted at the same resource. For example, if
+  #   a change in this property takes into account any changes that a scheduled refresh would have performed,
+  #   then the scheduled refresh would be deleted.
   # @option options [Object] _any_ Any other option is treated as a call to a setter having the given
   #   option name (e.g. `:required_features` calls `required_features=` with the option's value as an
   #   argument).
@@ -185,9 +191,9 @@ class Puppet::Parameter::ValueCollection
   end
 
   # Returns a valid value matcher (a literal or regular expression)
-  # @todo This looks odd, asking for an instance that matches a symbol, or a instance that has
+  # @todo This looks odd, asking for an instance that matches a symbol, or an instance that has
   #   a regexp. What is the intention here? Marking as api private...
-  # 
+  #
   # @return [Puppet::Parameter::Value] a valid valud matcher
   # @api private
   #

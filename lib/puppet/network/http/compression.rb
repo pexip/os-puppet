@@ -46,7 +46,11 @@ module Puppet::Network::HTTP::Compression
     end
 
     def add_accept_encoding(headers={})
-      headers['accept-encoding'] = 'gzip; q=1.0, deflate; q=1.0; identity' if Puppet.settings[:http_compression]
+      if Puppet.settings[:http_compression]
+        headers['accept-encoding'] = 'gzip; q=1.0, deflate; q=1.0; identity'
+      else
+        headers['accept-encoding'] = 'identity'
+      end
       headers
     end
 
@@ -69,7 +73,7 @@ module Puppet::Network::HTTP::Compression
         out = @uncompressor.inflate(chunk)
         @first = false
         return out
-      rescue Zlib::DataError => z
+      rescue Zlib::DataError
         # it can happen that we receive a raw deflate stream
         # which might make our inflate throw a data error.
         # in this case, we try with a verbatim (no header)

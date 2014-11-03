@@ -21,7 +21,7 @@ class Puppet::Node::Exec < Puppet::Indirector::Exec
 
     # Set the requested environment if it wasn't overridden
     # If we don't do this it gets set to the local default
-    result[:environment] ||= request.environment.name
+    result[:environment] ||= request.environment
 
     create_node(request.key, result)
   end
@@ -64,6 +64,6 @@ class Puppet::Node::Exec < Puppet::Indirector::Exec
     end
 
   rescue => detail
-      raise Puppet::Error, "Could not load external node results for #{name}: #{detail}"
+      raise Puppet::Error, "Could not load external node results for #{name}: #{detail}", detail.backtrace
   end
 end

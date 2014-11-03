@@ -1,4 +1,4 @@
-config = Puppet::Util::Reference.newreference(:configuration, :depth => 1, :doc => "A reference for all configuration parameters") do
+config = Puppet::Util::Reference.newreference(:configuration, :depth => 1, :doc => "A reference for all settings") do
   docs = {}
   Puppet.settings.each do |name, object|
     docs[name] = object
@@ -14,14 +14,13 @@ config = Puppet::Util::Reference.newreference(:configuration, :depth => 1, :doc 
 
     # Print the doc string itself
     begin
-      str << object.desc.gsub(/\n/, " ")
+      str << Puppet::Util::Docs.scrub(object.desc)
     rescue => detail
       Puppet.log_exception(detail)
     end
     str << "\n\n"
 
     # Now print the data about the item.
-    str << ""
     val = object.default
     if name.to_s == "vardir"
       val = "/var/lib/puppet"

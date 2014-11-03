@@ -20,6 +20,15 @@ class Puppet::Parser::Lexer
   attr_accessor :line, :indefine
   alias :indefine? :indefine
 
+  # Returns the position on the line.
+  # This implementation always returns nil. It is here for API reasons in Puppet::Error
+  # which needs to support both --parser current, and --parser future.
+  #
+  def pos
+    # Make the lexer comply with newer API. It does not produce a pos...
+    nil
+  end
+
   def lex_error msg
     raise Puppet::LexError.new(msg)
   end
@@ -155,6 +164,7 @@ class Puppet::Parser::Lexer
     '-'   => :MINUS,
     '/'   => :DIV,
     '*'   => :TIMES,
+    '%'   => :MODULO,
     '<<'  => :LSHIFT,
     '>>'  => :RSHIFT,
     '=~'  => :MATCH,
@@ -337,7 +347,7 @@ class Puppet::Parser::Lexer
   def file=(file)
     @file = file
     @line = 1
-    contents = File.exists?(file) ? File.read(file) : ""
+    contents = Puppet::FileSystem.exist?(file) ? Puppet::FileSystem.read(file) : ""
     @scanner = StringScanner.new(contents)
   end
 
@@ -450,7 +460,6 @@ class Puppet::Parser::Lexer
     skip
 
     until token_queue.empty? and @scanner.eos? do
-      yielded = false
       matched_token, value = find_token
 
       # error out if we didn't match anything at all
@@ -469,26 +478,27 @@ class Puppet::Parser::Lexer
         next
       end
 
-      lexing_context[:after]         = final_token.name unless newline
-      lexing_context[:string_interpolation_depth] += 1 if final_token.name == :DQPRE
-      lexing_context[:string_interpolation_depth] -= 1 if final_token.name == :DQPOST
+      final_token_name = final_token.name
+      lexing_context[:after]         = final_token_name unless newline
+      lexing_context[:string_interpolation_depth] += 1 if final_token_name == :DQPRE
+      lexing_context[:string_interpolation_depth] -= 1 if final_token_name == :DQPOST
 
       value = token_value[:value]
 
-      if match = @@pairs[value] and final_token.name != :DQUOTE and final_token.name != :SQUOTE
+      if match = @@pairs[value] and final_token_name != :DQUOTE and final_token_name != :SQUOTE
         @expected << match
-      elsif exp = @expected[-1] and exp == value and final_token.name != :DQUOTE and final_token.name != :SQUOTE
+      elsif exp = @expected[-1] and exp == value and final_token_name != :DQUOTE and final_token_name != :SQUOTE
         @expected.pop
       end
 
-      if final_token.name == :LBRACE or final_token.name == :LPAREN
+      if final_token_name == :LBRACE or final_token_name == :LPAREN
         commentpush
       end
-      if final_token.name == :RPAREN
+      if final_token_name == :RPAREN
         commentpop
       end
 
-      yield [final_token.name, token_value]
+      yield [final_token_name, token_value]
 
       if @previous_token
         namestack(value) if @previous_token.name == :CLASS and value != '{'

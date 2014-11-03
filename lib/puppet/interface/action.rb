@@ -1,5 +1,3 @@
-require 'puppet/interface'
-require 'puppet/interface/documentation'
 require 'puppet/util/methodhelper'
 require 'prettyprint'
 
@@ -295,7 +293,7 @@ WRAPPER
   end
 
   def display_global_options(*args)
-    args ? add_display_global_options(args) : @display_global_options + @face.display_global_options 
+    args ? add_display_global_options(args) : @display_global_options + @face.display_global_options
   end
   alias :display_global_option :display_global_options
 

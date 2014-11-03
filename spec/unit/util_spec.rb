@@ -19,7 +19,7 @@ describe Puppet::Util do
     end
 
     def get_mode(file)
-      File.lstat(file).mode & 07777
+      Puppet::FileSystem.lstat(file).mode & 07777
     end
   end
 
@@ -59,6 +59,7 @@ describe Puppet::Util do
 
     it "should remove any new environment variables after the block ends" do
       @new_env[:FOO] = "bar"
+      ENV["FOO"] = nil
       Puppet::Util.withenv @new_env do
         ENV["FOO"].should == "bar"
       end
@@ -223,6 +224,9 @@ describe Puppet::Util do
       $stdin.stubs(:reopen)
       $stdout.stubs(:reopen)
       $stderr.stubs(:reopen)
+
+      # ensure that we don't really close anything!
+      (0..256).each {|n| IO.stubs(:new) }
     end
 
     it "should close all open file descriptors except stdin/stdout/stderr" do
@@ -270,7 +274,10 @@ describe Puppet::Util do
     it "should warn if the user's HOME is not set but their PATH contains a ~" do
       env_path = %w[~/bin /usr/bin /bin].join(File::PATH_SEPARATOR)
 
-      Puppet::Util.withenv({:HOME => nil, :PATH => env_path}) do
+      env = {:HOME => nil, :PATH => env_path}
+      env.merge!({:HOMEDRIVE => nil, :USERPROFILE => nil}) if Puppet.features.microsoft_windows?
+
+      Puppet::Util.withenv(env) do
         Puppet::Util::Warnings.expects(:warnonce).once
         Puppet::Util.which('foo')
       end
@@ -442,7 +449,7 @@ describe Puppet::Util do
 
     it "should copy the permissions of the source file before yielding on Unix", :if => !Puppet.features.microsoft_windows? do
       set_mode(0555, target.path)
-      inode = File.stat(target.path).ino
+      inode = Puppet::FileSystem.stat(target.path).ino
 
       yielded = false
       subject.replace_file(target.path, 0600) do |fh|
@@ -451,19 +458,19 @@ describe Puppet::Util do
       end
       yielded.should be_true
 
-      File.stat(target.path).ino.should_not == inode
+      Puppet::FileSystem.stat(target.path).ino.should_not == inode
       get_mode(target.path).should == 0555
     end
 
     it "should use the default permissions if the source file doesn't exist" do
       new_target = target.path + '.foo'
-      File.should_not be_exist(new_target)
+      Puppet::FileSystem.exist?(new_target).should be_false
 
       begin
         subject.replace_file(new_target, 0555) {|fh| fh.puts "foo" }
         get_mode(new_target).should == 0555
       ensure
-        File.unlink(new_target) if File.exists?(new_target)
+        Puppet::FileSystem.unlink(new_target) if Puppet::FileSystem.exist?(new_target)
       end
     end
 
@@ -491,6 +498,22 @@ describe Puppet::Util do
       # ...and check the replacement was complete.
       File.read(target.path).should == "hello, world\n"
     end
+
+    {:string => '664', :number => 0664, :symbolic => "ug=rw-,o=r--" }.each do |label,mode|
+      it "should support #{label} format permissions" do
+        new_target = target.path + "#{mode}.foo"
+        Puppet::FileSystem.exist?(new_target).should be_false
+
+        begin
+          subject.replace_file(new_target, mode) {|fh| fh.puts "this is an interesting content" }
+
+          get_mode(new_target).should == 0664
+        ensure
+          Puppet::FileSystem.unlink(new_target) if Puppet::FileSystem.exist?(new_target)
+        end
+      end
+    end
+
   end
 
   describe "#pretty_backtrace" do
@@ -524,6 +547,31 @@ describe Puppet::Util do
       Puppet::Util::Execution.expects(:execute).with(command)
 
       subject.execute(command)
+    end
+  end
+
+  describe "#deterministic_rand" do
+
+    it "should not fiddle with future rand calls" do
+      Puppet::Util.deterministic_rand(123,20)
+      rand_one = rand()
+      Puppet::Util.deterministic_rand(123,20)
+      rand().should_not eql(rand_one)
+    end
+
+    if defined?(Random) == 'constant' && Random.class == Class
+      it "should not fiddle with the global seed" do
+        srand(1234)
+        Puppet::Util.deterministic_rand(123,20)
+        srand().should eql(1234)
+      end
+    # ruby below 1.9.2 variant
+    else
+      it "should set a new global seed" do
+        srand(1234)
+        Puppet::Util.deterministic_rand(123,20)
+        srand().should_not eql(1234)
+      end
     end
   end
 end

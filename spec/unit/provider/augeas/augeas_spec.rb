@@ -276,6 +276,61 @@ describe provider_class do
       @provider.need_to_run?.should == true
     end
 
+    describe "performing numeric comparisons (#22617)" do
+      it "should return true when a get string compare is true" do
+        @resource[:onlyif] = "get bpath > a"
+        @augeas.stubs("get").returns("b")
+        @provider.need_to_run?.should == true
+      end
+
+      it "should return false when a get string compare is false" do
+        @resource[:onlyif] = "get a19path > a2"
+        @augeas.stubs("get").returns("a19")
+        @provider.need_to_run?.should == false
+      end
+
+      it "should return true when a get int gt compare is true" do
+        @resource[:onlyif] = "get path19 > 2"
+        @augeas.stubs("get").returns("19")
+        @provider.need_to_run?.should == true
+      end
+
+      it "should return true when a get int ge compare is true" do
+        @resource[:onlyif] = "get path19 >= 2"
+        @augeas.stubs("get").returns("19")
+        @provider.need_to_run?.should == true
+      end
+
+      it "should return true when a get int lt compare is true" do
+        @resource[:onlyif] = "get path2 < 19"
+        @augeas.stubs("get").returns("2")
+        @provider.need_to_run?.should == true
+      end
+
+      it "should return false when a get int le compare is false" do
+        @resource[:onlyif] = "get path39 <= 4"
+        @augeas.stubs("get").returns("39")
+        @provider.need_to_run?.should == false
+      end
+    end
+    describe "performing is_numeric checks (#22617)" do
+      it "should return false for nil" do
+        @provider.is_numeric?(nil).should == false
+      end
+      it "should return true for Fixnums" do
+        @provider.is_numeric?(9).should == true
+      end
+      it "should return true for numbers in Strings" do
+        @provider.is_numeric?('9').should == true
+      end
+      it "should return false for non-number Strings" do
+        @provider.is_numeric?('x9').should == false
+      end
+      it "should return false for other types" do
+        @provider.is_numeric?([true]).should == false
+      end
+    end
+
     it "should return false when a get filter does not match" do
       @resource[:onlyif] = "get path == another value"
       @augeas.stubs("get").returns("value")
@@ -310,16 +365,56 @@ describe provider_class do
     end
 
     #Ticket 5211 testing
-    it "should return false when a size doeas equal the provided value" do
+    it "should return false when a size does equal the provided value" do
       @resource[:onlyif] = "match path size != 3"
       @augeas.stubs("match").returns(["set", "of", "values"])
       @provider.need_to_run?.should == false
     end
 
+    [true, false].product([true, false]) do |cfg, param|
+      describe "and Puppet[:show_diff] is #{cfg} and show_diff => #{param}" do
+        let(:file) { "/some/random/file" }
+
+        before(:each) do
+          Puppet[:show_diff] = cfg
+          @resource[:show_diff] = param
+
+          @resource[:root] = ""
+          @resource[:context] = "/files"
+          @resource[:changes] = ["set #{file}/foo bar"]
+
+          File.stubs(:delete)
+          @provider.stubs(:get_augeas_version).returns("0.10.0")
+          @provider.stubs("diff").with("#{file}", "#{file}.augnew").returns("diff")
+
+          @augeas.stubs(:set).returns(true)
+          @augeas.stubs(:save).returns(true)
+          @augeas.stubs(:match).with("/augeas/events/saved").returns(["/augeas/events/saved"])
+          @augeas.stubs(:get).with("/augeas/events/saved").returns("/files#{file}")
+          @augeas.stubs(:set).with("/augeas/save", "newfile")
+        end
+
+        if cfg && param
+          it "should display a diff" do
+            @provider.should be_need_to_run
+
+            expect(@logs[0].message).to eq("\ndiff")
+          end
+        else
+          it "should not display a diff" do
+            @provider.should be_need_to_run
+
+            @logs.should be_empty
+          end
+        end
+      end
+    end
+
     # Ticket 2728 (diff files)
-    describe "and Puppet[:show_diff] is set" do
+    describe "and configured to show diffs" do
       before(:each) do
         Puppet[:show_diff] = true
+        @resource[:show_diff] = true
 
         @resource[:root] = ""
         @provider.stubs(:get_augeas_version).returns("0.10.0")
@@ -327,23 +422,26 @@ describe provider_class do
         @augeas.stubs(:save).returns(true)
       end
 
-      it "should call diff when a file is shown to have been changed" do
+      it "should display a diff when a single file is shown to have been changed" do
         file = "/etc/hosts"
         File.stubs(:delete)
 
+        @resource[:loglevel] = "crit"
         @resource[:context] = "/files"
         @resource[:changes] = ["set #{file}/foo bar"]
 
         @augeas.stubs(:match).with("/augeas/events/saved").returns(["/augeas/events/saved"])
         @augeas.stubs(:get).with("/augeas/events/saved").returns("/files#{file}")
         @augeas.expects(:set).with("/augeas/save", "newfile")
-        @augeas.expects(:close).never()
+        @provider.expects("diff").with("#{file}", "#{file}.augnew").returns("diff")
 
-        @provider.expects("diff").with("#{file}", "#{file}.augnew").returns("")
         @provider.should be_need_to_run
+
+        expect(@logs[0].message).to eq("\ndiff")
+        expect(@logs[0].level).to eq(:crit)
       end
 
-      it "should call diff for each file thats changed" do
+      it "should display a diff for each file that is changed when changing many files" do
         file1 = "/etc/hosts"
         file2 = "/etc/resolv.conf"
         File.stubs(:delete)
@@ -355,11 +453,13 @@ describe provider_class do
         @augeas.stubs(:get).with("/augeas/events/saved[1]").returns("/files#{file1}")
         @augeas.stubs(:get).with("/augeas/events/saved[2]").returns("/files#{file2}")
         @augeas.expects(:set).with("/augeas/save", "newfile")
-        @augeas.expects(:close).never()
+        @provider.expects(:diff).with("#{file1}", "#{file1}.augnew").returns("diff #{file1}")
+        @provider.expects(:diff).with("#{file2}", "#{file2}.augnew").returns("diff #{file2}")
 
-        @provider.expects(:diff).with("#{file1}", "#{file1}.augnew").returns("")
-        @provider.expects(:diff).with("#{file2}", "#{file2}.augnew").returns("")
         @provider.should be_need_to_run
+
+        expect(@logs.collect(&:message)).to include("\ndiff #{file1}", "\ndiff #{file2}")
+        expect(@logs.collect(&:level)).to eq([:notice, :notice])
       end
 
       describe "and resource[:root] is set" do
@@ -375,10 +475,12 @@ describe provider_class do
           @augeas.stubs(:match).with("/augeas/events/saved").returns(["/augeas/events/saved"])
           @augeas.stubs(:get).with("/augeas/events/saved").returns("/files#{file}")
           @augeas.expects(:set).with("/augeas/save", "newfile")
-          @augeas.expects(:close).never()
+          @provider.expects(:diff).with("#{root}#{file}", "#{root}#{file}.augnew").returns("diff")
 
-          @provider.expects(:diff).with("#{root}#{file}", "#{root}#{file}.augnew").returns("")
           @provider.should be_need_to_run
+
+          expect(@logs[0].message).to eq("\ndiff")
+          expect(@logs[0].level).to eq(:notice)
         end
       end
 
@@ -444,7 +546,8 @@ describe provider_class do
         @augeas.expects(:close)
 
         @provider.expects(:diff).never()
-        lambda { @provider.need_to_run? }.should raise_error
+        @provider.expects(:print_put_errors)
+        lambda { @provider.need_to_run? }.should raise_error(Puppet::Error)
       end
     end
   end
@@ -606,7 +709,20 @@ describe provider_class do
       @augeas.expects(:respond_to?).with("clearm").returns(false)
       @augeas.expects(:set).with("/foo/test[1]/Jar/Jar", "Foo").returns(true)
       @augeas.expects(:set).with("/foo/test[2]/Jar/Jar", "Bar").returns(true)
-      expect { @provider.execute_changes }.to raise_error RuntimeError, /command 'clearm' not supported/
+      expect { @provider.execute_changes }.to raise_error(RuntimeError, /command 'clearm' not supported/)
+    end
+
+    it "should throw error if saving failed" do
+      @resource[:changes] = ["set test[1]/Jar/Jar Foo","set test[2]/Jar/Jar Bar","clearm test Jar/Jar"]
+      @resource[:context] = "/foo/"
+      @augeas.expects(:respond_to?).with("clearm").returns(true)
+      @augeas.expects(:set).with("/foo/test[1]/Jar/Jar", "Foo").returns(true)
+      @augeas.expects(:set).with("/foo/test[2]/Jar/Jar", "Bar").returns(true)
+      @augeas.expects(:clearm).with("/foo/test", "Jar/Jar").returns(true)
+      @augeas.expects(:save).returns(false)
+      @provider.expects(:print_put_errors)
+      @augeas.expects(:match).returns([])
+      expect { @provider.execute_changes }.to raise_error(Puppet::Error)
     end
   end
 
@@ -619,7 +735,7 @@ describe provider_class do
       link = tmpfile('link')
       target = tmpfile('target')
       FileUtils.touch(target)
-      FileUtils.symlink(target, link)
+      Puppet::FileSystem.symlink(target, link)
 
       resource = Puppet::Type.type(:augeas).new(
         :name => 'test',
@@ -634,7 +750,7 @@ describe provider_class do
       catalog.apply
 
       File.ftype(link).should == 'link'
-      File.readlink(link).should == target
+      Puppet::FileSystem.readlink(link).should == target
       File.read(target).should =~ /PermitRootLogin no/
     end
   end
@@ -650,28 +766,48 @@ describe provider_class do
       before do
         @augeas.expects(:match).with("/augeas//error").returns(["/augeas/files/foo/error"])
         @augeas.expects(:match).with("/augeas/files/foo/error/*").returns(["/augeas/files/foo/error/path", "/augeas/files/foo/error/message"])
+        @augeas.expects(:get).with("/augeas/files/foo/error").returns("some_failure")
         @augeas.expects(:get).with("/augeas/files/foo/error/path").returns("/foo")
         @augeas.expects(:get).with("/augeas/files/foo/error/message").returns("Failed to...")
       end
 
-      it "and output to debug" do
-        @provider.expects(:debug).times(4)
-        @provider.print_load_errors
+      it "and output only to debug when no path supplied" do
+        @provider.expects(:debug).times(5)
+        @provider.expects(:warning).never()
+        @provider.print_load_errors(nil)
       end
 
-      it "and output a warning and to debug" do
+      it "and output a warning and to debug when path supplied" do
+        @augeas.expects(:match).with("/augeas/files/foo//error").returns(["/augeas/files/foo/error"])
         @provider.expects(:warning).once()
-        @provider.expects(:debug).times(3)
-        @provider.print_load_errors(:warning => true)
+        @provider.expects(:debug).times(4)
+        @provider.print_load_errors('/augeas/files/foo//error')
       end
+
+      it "and output only to debug when path doesn't match" do
+        @augeas.expects(:match).with("/augeas/files/foo//error").returns([])
+        @provider.expects(:warning).never()
+        @provider.expects(:debug).times(5)
+        @provider.print_load_errors('/augeas/files/foo//error')
+      end
+    end
+
+    it "should find load errors from lenses" do
+      @augeas.expects(:match).with("/augeas//error").twice.returns(["/augeas/load/Xfm/error"])
+      @augeas.expects(:match).with("/augeas/load/Xfm/error/*").returns([])
+      @augeas.expects(:get).with("/augeas/load/Xfm/error").returns(["Could not find lens php.aug"])
+      @provider.expects(:warning).once()
+      @provider.expects(:debug).twice()
+      @provider.print_load_errors('/augeas//error')
     end
 
     it "should find save errors and output to debug" do
       @augeas.expects(:match).with("/augeas//error[. = 'put_failed']").returns(["/augeas/files/foo/error"])
       @augeas.expects(:match).with("/augeas/files/foo/error/*").returns(["/augeas/files/foo/error/path", "/augeas/files/foo/error/message"])
+      @augeas.expects(:get).with("/augeas/files/foo/error").returns("some_failure")
       @augeas.expects(:get).with("/augeas/files/foo/error/path").returns("/foo")
       @augeas.expects(:get).with("/augeas/files/foo/error/message").returns("Failed to...")
-      @provider.expects(:debug).times(4)
+      @provider.expects(:debug).times(5)
       @provider.print_put_errors
     end
   end
@@ -690,7 +826,7 @@ describe provider_class do
     end
 
     it "should report load errors to debug only" do
-      @provider.expects(:print_load_errors).with(:warning => false)
+      @provider.expects(:print_load_errors).with(nil)
       aug = @provider.open_augeas
       aug.should_not == nil
     end
@@ -700,7 +836,7 @@ describe provider_class do
       @resource[:incl] = "/etc/hosts"
       @resource[:lens] = "Hosts.lns"
 
-      @provider.expects(:print_load_errors).with(:warning => true)
+      @provider.expects(:print_load_errors).with('/augeas//error')
       aug = @provider.open_augeas
       aug.should_not == nil
       aug.match("/files/etc/fstab").should == []
@@ -733,7 +869,7 @@ describe provider_class do
       it "should only load one file if relevant context given" do
         @resource[:context] = "/files/etc/fstab"
 
-        @provider.expects(:print_load_errors).with(:warning => true)
+        @provider.expects(:print_load_errors).with('/augeas/files/etc/fstab//error')
         aug = @provider.open_augeas
         aug.should_not == nil
         aug.match("/files/etc/fstab").should == ["/files/etc/fstab"]
@@ -744,6 +880,7 @@ describe provider_class do
         @resource[:context] = "/files/etc/test"
         @resource[:load_path] = my_fixture_dir
 
+        @provider.expects(:print_load_errors).with('/augeas/files/etc/test//error')
         aug = @provider.open_augeas
         aug.should_not == nil
         aug.match("/files/etc/fstab").should == []
@@ -754,6 +891,7 @@ describe provider_class do
       it "should load standard files if context isn't specific" do
         @resource[:context] = "/files/etc"
 
+        @provider.expects(:print_load_errors).with(nil)
         aug = @provider.open_augeas
         aug.should_not == nil
         aug.match("/files/etc/fstab").should == ["/files/etc/fstab"]
@@ -763,6 +901,7 @@ describe provider_class do
       it "should not optimise if the context is a complex path" do
         @resource[:context] = "/files/*[label()='etc']"
 
+        @provider.expects(:print_load_errors).with(nil)
         aug = @provider.open_augeas
         aug.should_not == nil
         aug.match("/files/etc/fstab").should == ["/files/etc/fstab"]

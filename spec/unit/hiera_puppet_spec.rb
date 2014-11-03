@@ -1,7 +1,14 @@
 require 'spec_helper'
 require 'hiera_puppet'
+require 'puppet_spec/scope'
 
 describe 'HieraPuppet' do
+  include PuppetSpec::Scope
+
+  after(:all) do
+    HieraPuppet.instance_variable_set(:@hiera, nil)
+  end
+
   describe 'HieraPuppet#hiera_config' do
     let(:hiera_config_data) do
       { :backend => 'yaml' }
@@ -35,11 +42,11 @@ describe 'HieraPuppet' do
   end
 
   describe 'HieraPuppet#hiera_config_file' do
-    it "should return nil when we cannot derive the hiera config file form Puppet.settings" do
+    it "should return nil when we cannot derive the hiera config file from Puppet.settings" do
       begin
         Puppet.settings[:hiera_config] = nil
       rescue ArgumentError => detail
-        raise unless detail.message =~ /unknown configuration parameter/
+        raise unless detail.message =~ /unknown setting/
       end
       HieraPuppet.send(:hiera_config_file).should be_nil
     end
@@ -48,11 +55,11 @@ describe 'HieraPuppet' do
       begin
         Puppet.settings[:hiera_config] = "/dev/null/my_hiera.yaml"
       rescue ArgumentError => detail
-        raise unless detail.message =~ /unknown configuration parameter/
+        raise unless detail.message =~ /unknown setting/
         pending("This example does not apply to Puppet #{Puppet.version} because it does not have this setting")
       end
 
-      File.stubs(:exist?).with(Puppet[:hiera_config]).returns(true)
+      Puppet::FileSystem.stubs(:exist?).with(Puppet[:hiera_config]).returns(true)
       HieraPuppet.send(:hiera_config_file).should == Puppet[:hiera_config]
     end
 
@@ -60,18 +67,18 @@ describe 'HieraPuppet' do
       begin
         Puppet.settings[:hiera_config] = nil
       rescue ArgumentError => detail
-        raise unless detail.message =~ /unknown configuration parameter/
+        raise unless detail.message =~ /unknown setting/
       end
       Puppet.settings[:confdir] = "/dev/null/puppet"
       hiera_config = File.join(Puppet[:confdir], 'hiera.yaml')
-      File.stubs(:exist?).with(hiera_config).returns(true)
+      Puppet::FileSystem.stubs(:exist?).with(hiera_config).returns(true)
 
       HieraPuppet.send(:hiera_config_file).should == hiera_config
     end
   end
 
   describe 'HieraPuppet#lookup' do
-    let :scope do Puppet::Parser::Scope.new_for_test_harness('foo') end
+    let :scope do create_test_scope_for_node('foo') end
 
     before :each do
       Puppet[:hiera_config] = PuppetSpec::Files.tmpfile('hiera_config')

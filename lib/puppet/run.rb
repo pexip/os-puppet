@@ -33,6 +33,17 @@ class Puppet::Run
     @options = options
   end
 
+  def initialize_from_hash(hash)
+    @options = {}
+
+    hash['options'].each do |key, value|
+      @options[key.to_sym] = value
+    end
+
+    @background = hash['background']
+    @status = hash['status']
+  end
+
   def log_run
     msg = ""
     msg += "triggered run" % if options[:tags]
@@ -63,16 +74,36 @@ class Puppet::Run
     self
   end
 
-  def self.from_pson( pson )
+  def self.from_hash(hash)
+    obj = allocate
+    obj.initialize_from_hash(hash)
+    obj
+  end
+
+  def self.from_data_hash(data)
+    if data['options']
+      return from_hash(data)
+    end
+
     options = { :pluginsync => Puppet[:pluginsync] }
-    pson.each do |key, value|
+
+    data.each do |key, value|
       options[key.to_sym] = value
     end
 
     new(options)
   end
 
-  def to_pson
-    @options.merge(:background => @background).to_pson
+  def self.from_pson(hash)
+    Puppet.deprecation_warning("from_pson is being removed in favour of from_data_hash.")
+    self.from_data_hash(hash)
+  end
+
+  def to_data_hash
+    {
+      :options => @options,
+      :background => @background,
+      :status => @status
+    }
   end
 end

@@ -7,150 +7,46 @@ describe Puppet::Network::HTTP::Connection do
 
   let (:host) { "me" }
   let (:port) { 54321 }
-  subject { Puppet::Network::HTTP::Connection.new(host, port) }
+  subject { Puppet::Network::HTTP::Connection.new(host, port, :verify => Puppet::SSL::Validator.no_validator) }
+  let (:httpok) { Net::HTTPOK.new('1.1', 200, '') }
 
   context "when providing HTTP connections" do
-    after do
-      Puppet::Network::HTTP::Connection.instance_variable_set("@ssl_host", nil)
-    end
-
-    it "should use the global SSL::Host instance to get its certificate information" do
-      host = mock 'host'
-      Puppet::SSL::Host.expects(:localhost).with.returns host
-      subject.send(:ssl_host).should equal(host)
-    end
-
     context "when initializing http instances" do
-      before :each do
-        # All of the cert stuff is tested elsewhere
-        Puppet::Network::HTTP::Connection.stubs(:cert_setup)
-      end
-
       it "should return an http instance created with the passed host and port" do
-        http = subject.send(:connection)
-        http.should be_an_instance_of Net::HTTP
-        http.address.should == host
-        http.port.should    == port
+        conn = Puppet::Network::HTTP::Connection.new(host, port, :verify => Puppet::SSL::Validator.no_validator)
+
+        expect(conn.address).to eq(host)
+        expect(conn.port).to eq(port)
       end
 
       it "should enable ssl on the http instance by default" do
-        http = subject.send(:connection)
-        http.should be_use_ssl
+        conn = Puppet::Network::HTTP::Connection.new(host, port, :verify => Puppet::SSL::Validator.no_validator)
+
+        expect(conn).to be_use_ssl
       end
 
-      it "can set ssl using an option" do
-        Puppet::Network::HTTP::Connection.new(host, port, false).send(:connection).should_not be_use_ssl
-        Puppet::Network::HTTP::Connection.new(host, port, true).send(:connection).should be_use_ssl
+      it "can disable ssl using an option" do
+        conn = Puppet::Network::HTTP::Connection.new(host, port, :use_ssl => false, :verify => Puppet::SSL::Validator.no_validator)
+
+        expect(conn).to_not be_use_ssl
       end
 
-      context "proxy and timeout settings should propagate" do
-        subject { Puppet::Network::HTTP::Connection.new(host, port).send(:connection) }
-        before :each do
-          Puppet[:http_proxy_host] = "myhost"
-          Puppet[:http_proxy_port] = 432
-          Puppet[:configtimeout]   = 120
-        end
+      it "can enable ssl using an option" do
+        conn = Puppet::Network::HTTP::Connection.new(host, port, :use_ssl => true, :verify => Puppet::SSL::Validator.no_validator)
 
-        its(:open_timeout)  { should == Puppet[:configtimeout] }
-        its(:read_timeout)  { should == Puppet[:configtimeout] }
-        its(:proxy_address) { should == Puppet[:http_proxy_host] }
-        its(:proxy_port)    { should == Puppet[:http_proxy_port] }
+        expect(conn).to be_use_ssl
       end
 
-      it "should not set a proxy if the value is 'none'" do
-        Puppet[:http_proxy_host] = 'none'
-        subject.send(:connection).proxy_address.should be_nil
-      end
-
-    end
-
-    describe "when doing SSL setup for http instances" do
-      let :store do stub('store') end
-
-      let :ca_auth_file do
-        '/path/to/ssl/certs/ssl_server_ca_auth.pem'
-      end
-
-      let :ssl_configuration do
-        stub('ssl_configuration', :ca_auth_file => ca_auth_file)
-      end
-
-      before :each do
-        Puppet[:hostcert]    = '/host/cert'
-        Puppet::Network::HTTP::Connection.any_instance.stubs(:ssl_configuration).returns(ssl_configuration)
-
-        cert  = stub 'cert', :content => 'real_cert'
-        key   = stub 'key',  :content => 'real_key'
-        host  = stub 'host', :certificate => cert, :key => key, :ssl_store => store
-        Puppet::Network::HTTP::Connection.any_instance.stubs(:ssl_host).returns(host)
-      end
-
-      shared_examples "HTTPS setup without all certificates" do
-        subject { Puppet::Network::HTTP::Connection.new(host, port, true).send(:connection) }
-
-        it                { should be_use_ssl }
-        its(:cert)        { should be_nil }
-        its(:ca_file)     { should be_nil }
-        its(:key)         { should be_nil }
-        its(:verify_mode) { should == OpenSSL::SSL::VERIFY_NONE }
-      end
-
-      context "with neither a host cert or a local CA cert" do
-        before :each do
-          FileTest.stubs(:exist?).with(Puppet[:hostcert]).returns(false)
-          FileTest.stubs(:exist?).with(ca_auth_file).returns(false)
-        end
-
-        include_examples "HTTPS setup without all certificates"
-      end
-
-      context "with there is no host certificate" do
-        before :each do
-          FileTest.stubs(:exist?).with(Puppet[:hostcert]).returns(false)
-          FileTest.stubs(:exist?).with(ca_auth_file).returns(true)
-        end
-
-        include_examples "HTTPS setup without all certificates"
-      end
-
-      context "with there is no local CA certificate" do
-        before :each do
-          FileTest.stubs(:exist?).with(Puppet[:hostcert]).returns(true)
-          FileTest.stubs(:exist?).with(ca_auth_file).returns(false)
-        end
-
-        include_examples "HTTPS setup without all certificates"
-      end
-
-      context "with both the host and CA cert" do
-        subject { Puppet::Network::HTTP::Connection.new(host, port, true).send(:connection) }
-
-        before :each do
-          FileTest.expects(:exist?).with(Puppet[:hostcert]).returns(true)
-          FileTest.expects(:exist?).with(ca_auth_file).returns(true)
-        end
-
-        it                { should be_use_ssl }
-        its(:cert_store)  { should equal store }
-        its(:cert)        { should == "real_cert" }
-        its(:key)         { should == "real_key" }
-        its(:verify_mode) { should == OpenSSL::SSL::VERIFY_PEER }
-        its(:ca_file)     { should == ca_auth_file }
-      end
-
-      it "should set up certificate information when creating http instances" do
-        subject.expects(:cert_setup)
-        subject.send(:connection)
+      it "should raise Puppet::Error when invalid options are specified" do
+        expect { Puppet::Network::HTTP::Connection.new(host, port, :invalid_option => nil) }.to raise_error(Puppet::Error, 'Unrecognized option(s): :invalid_option')
       end
     end
   end
 
-
   context "when methods that accept a block are called with a block" do
     let (:host) { "my_server" }
     let (:port) { 8140 }
-    let (:subject) { Puppet::Network::HTTP::Connection.new(host, port, false) }
-    let (:httpok) { Net::HTTPOK.new('1.1', 200, '') }
+    let (:subject) { Puppet::Network::HTTP::Connection.new(host, port, :use_ssl => false, :verify => Puppet::SSL::Validator.no_validator) }
 
     before :each do
       httpok.stubs(:body).returns ""
@@ -180,85 +76,231 @@ describe Puppet::Network::HTTP::Connection do
     end
   end
 
-  context "when validating HTTPS requests" do
+  class ConstantErrorValidator
+    def initialize(args)
+      @fails_with = args[:fails_with]
+      @error_string = args[:error_string] || ""
+      @peer_certs = args[:peer_certs] || []
+    end
+
+    def setup_connection(connection)
+      connection.stubs(:start).raises(OpenSSL::SSL::SSLError.new(@fails_with))
+    end
+
+    def peer_certs
+      @peer_certs
+    end
+
+    def verify_errors
+      [@error_string]
+    end
+  end
+
+  class NoProblemsValidator
+    def initialize(cert)
+      @cert = cert
+    end
+
+    def setup_connection(connection)
+    end
+
+    def peer_certs
+      [@cert]
+    end
+
+    def verify_errors
+      []
+    end
+  end
+
+  shared_examples_for 'ssl verifier' do
     include PuppetSpec::Files
 
     let (:host) { "my_server" }
     let (:port) { 8140 }
-    let (:subject) { Puppet::Network::HTTP::Connection.new(host, port) }
-
-    def a_connection_that_verifies(args)
-      connection = Net::HTTP.new(host, port)
-      connection.stubs(:warn_if_near_expiration)
-      connection.stubs(:get).with do
-        connection.verify_callback.call(args[:has_passed_pre_checks], args[:in_context])
-        true
-      end.raises(OpenSSL::SSL::SSLError.new(args[:fails_with]))
-      connection
-    end
-
-    def a_store_context(args)
-      Puppet[:confdir] = tmpdir('conf')
-      cert = Puppet::SSL::CertificateAuthority.new.generate(args[:for_server], :dns_alt_names => args[:for_aliases]).content
-      ssl_context = mock('OpenSSL::X509::StoreContext')
-      ssl_context.stubs(:current_cert).returns(cert)
-      ssl_context.stubs(:error_string).returns(args[:with_error_string])
-      ssl_context
-    end
 
     it "should provide a useful error message when one is available and certificate validation fails", :unless => Puppet.features.microsoft_windows? do
-      subject.stubs(:create_connection).
-          returns(a_connection_that_verifies(:has_passed_pre_checks => false,
-                                             :in_context => a_store_context(:for_server => 'not_my_server',
-                                                                            :with_error_string => 'shady looking signature'),
-                                             :fails_with => 'certificate verify failed'))
+      connection = Puppet::Network::HTTP::Connection.new(
+        host, port,
+        :verify => ConstantErrorValidator.new(:fails_with => 'certificate verify failed',
+                                              :error_string => 'shady looking signature'))
+
       expect do
-        subject.request(:get, stub('request'))
-      end.to raise_error(Puppet::Error, "certificate verify failed: [shady looking signature for /CN=not_my_server]")
+        connection.get('request')
+      end.to raise_error(Puppet::Error, "certificate verify failed: [shady looking signature]")
     end
 
     it "should provide a helpful error message when hostname was not match with server certificate", :unless => Puppet.features.microsoft_windows? do
-      subject.stubs(:create_connection).
-          returns(a_connection_that_verifies(:has_passed_pre_checks => true,
-                                             :in_context => a_store_context(:for_server => 'not_my_server',
-                                                                            :for_aliases => 'foo,bar,baz'),
-                                             :fails_with => 'hostname was not match with server certificate'))
+      Puppet[:confdir] = tmpdir('conf')
 
-      expect { subject.request(:get, stub('request')) }.
-          to raise_error(Puppet::Error) do |error|
+      connection = Puppet::Network::HTTP::Connection.new(
+      host, port,
+      :verify => ConstantErrorValidator.new(
+        :fails_with => 'hostname was not match with server certificate',
+        :peer_certs => [Puppet::SSL::CertificateAuthority.new.generate(
+          'not_my_server', :dns_alt_names => 'foo,bar,baz')]))
+
+      expect do
+        connection.get('request')
+      end.to raise_error(Puppet::Error) do |error|
         error.message =~ /Server hostname 'my_server' did not match server certificate; expected one of (.+)/
         $1.split(', ').should =~ %w[DNS:foo DNS:bar DNS:baz DNS:not_my_server not_my_server]
       end
     end
 
     it "should pass along the error message otherwise" do
-      connection = Net::HTTP.new('my_server', 8140)
-      subject.stubs(:create_connection).returns(connection)
-
-      connection.stubs(:get).raises(OpenSSL::SSL::SSLError.new('some other message'))
+      connection = Puppet::Network::HTTP::Connection.new(
+        host, port,
+        :verify => ConstantErrorValidator.new(:fails_with => 'some other message'))
 
       expect do
-        subject.request(:get, stub('request'))
+        connection.get('request')
       end.to raise_error(/some other message/)
     end
 
     it "should check all peer certificates for upcoming expiration", :unless => Puppet.features.microsoft_windows? do
-      connection = Net::HTTP.new('my_server', 8140)
-      subject.stubs(:create_connection).returns(connection)
+      Puppet[:confdir] = tmpdir('conf')
+      cert = Puppet::SSL::CertificateAuthority.new.generate(
+        'server', :dns_alt_names => 'foo,bar,baz')
 
-      cert = stubs 'cert'
-      Puppet::SSL::Certificate.expects(:from_instance).twice.returns(cert)
+      connection = Puppet::Network::HTTP::Connection.new(
+        host, port,
+        :verify => NoProblemsValidator.new(cert))
 
-      connection.stubs(:get).with do
-        context = a_store_context(:for_server => 'a_server', :with_error_string => false)
-        connection.verify_callback.call(true, context)
-        connection.verify_callback.call(true, context)
-        true
-      end
+      Net::HTTP.any_instance.stubs(:start)
+      Net::HTTP.any_instance.stubs(:request).returns(httpok)
 
-      subject.expects(:warn_if_near_expiration).with(cert, cert)
+      connection.expects(:warn_if_near_expiration).with(cert)
 
-      subject.request(:get, stubs('request'))
+      connection.get('request')
     end
+  end
+
+  context "when using single use HTTPS connections" do
+    it_behaves_like 'ssl verifier' do
+    end
+  end
+
+  context "when using persistent HTTPS connections" do
+    around :each do |example|
+      pool = Puppet::Network::HTTP::Pool.new
+      Puppet.override(:http_pool => pool) do
+        example.run
+      end
+      pool.close
+    end
+
+    it_behaves_like 'ssl verifier' do
+    end
+  end
+
+  context "when response is a redirect" do
+    let (:site)       { Puppet::Network::HTTP::Site.new('http', 'my_server', 8140) }
+    let (:other_site) { Puppet::Network::HTTP::Site.new('http', 'redirected', 9292) }
+    let (:other_path) { "other-path" }
+    let (:verify) { Puppet::SSL::Validator.no_validator }
+    let (:subject) { Puppet::Network::HTTP::Connection.new(site.host, site.port, :use_ssl => false, :verify => verify) }
+    let (:httpredirection) do
+      response = Net::HTTPFound.new('1.1', 302, 'Moved Temporarily')
+      response['location'] = "#{other_site.addr}/#{other_path}"
+      response.stubs(:read_body).returns("This resource has moved")
+      response
+    end
+
+    def create_connection(site, options)
+      options[:use_ssl] = site.use_ssl?
+      Puppet::Network::HTTP::Connection.new(site.host, site.port, options)
+    end
+
+    it "should redirect to the final resource location" do
+      http = stub('http')
+      http.stubs(:request).returns(httpredirection).then.returns(httpok)
+
+      seq = sequence('redirection')
+      pool = Puppet.lookup(:http_pool)
+      pool.expects(:with_connection).with(site, anything).yields(http).in_sequence(seq)
+      pool.expects(:with_connection).with(other_site, anything).yields(http).in_sequence(seq)
+
+      conn = create_connection(site, :verify => verify)
+      conn.get('/foo')
+    end
+
+    def expects_redirection(conn, &block)
+      http = stub('http')
+      http.stubs(:request).returns(httpredirection)
+
+      pool = Puppet.lookup(:http_pool)
+      pool.expects(:with_connection).with(site, anything).yields(http)
+      pool
+    end
+
+    def expects_limit_exceeded(conn)
+      expect {
+        conn.get('/')
+      }.to raise_error(Puppet::Network::HTTP::RedirectionLimitExceededException)
+    end
+
+    it "should not redirect when the limit is 0" do
+      conn = create_connection(site, :verify => verify, :redirect_limit => 0)
+
+      pool = expects_redirection(conn)
+      pool.expects(:with_connection).with(other_site, anything).never
+
+      expects_limit_exceeded(conn)
+    end
+
+    it "should redirect only once" do
+      conn = create_connection(site, :verify => verify, :redirect_limit => 1)
+
+      pool = expects_redirection(conn)
+      pool.expects(:with_connection).with(other_site, anything).once
+
+      expects_limit_exceeded(conn)
+    end
+
+    it "should raise an exception when the redirect limit is exceeded" do
+      conn = create_connection(site, :verify => verify, :redirect_limit => 3)
+
+      pool = expects_redirection(conn)
+      pool.expects(:with_connection).with(other_site, anything).times(3)
+
+      expects_limit_exceeded(conn)
+    end
+  end
+
+  it "allows setting basic auth on get requests" do
+    expect_request_with_basic_auth
+
+    subject.get('/path', nil, :basic_auth => { :user => 'user', :password => 'password' })
+  end
+
+  it "allows setting basic auth on post requests" do
+    expect_request_with_basic_auth
+
+    subject.post('/path', 'data', nil, :basic_auth => { :user => 'user', :password => 'password' })
+  end
+
+  it "allows setting basic auth on head requests" do
+    expect_request_with_basic_auth
+
+    subject.head('/path', nil, :basic_auth => { :user => 'user', :password => 'password' })
+  end
+
+  it "allows setting basic auth on delete requests" do
+    expect_request_with_basic_auth
+
+    subject.delete('/path', nil, :basic_auth => { :user => 'user', :password => 'password' })
+  end
+
+  it "allows setting basic auth on put requests" do
+    expect_request_with_basic_auth
+
+    subject.put('/path', 'data', nil, :basic_auth => { :user => 'user', :password => 'password' })
+  end
+
+  def expect_request_with_basic_auth
+    Net::HTTP.any_instance.expects(:request).with do |request|
+      expect(request['authorization']).to match(/^Basic/)
+    end.returns(httpok)
   end
 end

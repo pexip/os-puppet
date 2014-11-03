@@ -96,18 +96,22 @@ describe provider_class do
   end
 
   describe "when enabling" do
-    it "should create a symlink between daemon dir and service dir" do
-      FileTest.stubs(:symlink?).returns(false)
-      File.expects(:symlink).with(File.join(@daemondir,"myservice"), File.join(@servicedir,"myservice")).returns(0)
+    it "should create a symlink between daemon dir and service dir", :if => Puppet.features.manages_symlinks? do
+      daemon_path = File.join(@daemondir,"myservice")
+      service_path = File.join(@servicedir,"myservice")
+      Puppet::FileSystem.expects(:symlink?).with(service_path).returns(false)
+      Puppet::FileSystem.expects(:symlink).with(daemon_path, File.join(@servicedir,"myservice")).returns(0)
       @provider.enable
     end
   end
 
   describe "when disabling" do
     it "should remove the '/etc/service/myservice' symlink" do
+      path = File.join(@servicedir,"myservice")
+#      mocked_file = mock(path, :symlink? => true)
       FileTest.stubs(:directory?).returns(false)
-      FileTest.stubs(:symlink?).returns(true)
-      File.expects(:unlink).with(File.join(@servicedir,"myservice")).returns(0)
+      Puppet::FileSystem.expects(:symlink?).with(path).returns(true) # mocked_file)
+      Puppet::FileSystem.expects(:unlink).with(path).returns(0)
       @provider.disable
     end
   end

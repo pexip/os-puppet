@@ -28,10 +28,9 @@ describe Puppet::Indirector::FileContent::FileServer, " when finding files" do
 
     Puppet.settings[:modulepath] = "/no/such/file"
 
-    env = Puppet::Node::Environment.new("foo")
-    env.stubs(:modulepath).returns [path]
+    env = Puppet::Node::Environment.create(:foo, [path])
 
-    result = Puppet::FileServing::Content.indirection.search("plugins", :environment => "foo", :recurse => true)
+    result = Puppet::FileServing::Content.indirection.search("plugins", :environment => env, :recurse => true)
 
     result.should_not be_nil
     result.length.should == 2
@@ -49,9 +48,9 @@ describe Puppet::Indirector::FileContent::FileServer, " when finding files" do
     file = File.join(modpath, "files", "myfile")
     File.open(file, "wb") { |f| f.write "1\r\n" }
 
-    Puppet.settings[:modulepath] = path
+    env = Puppet::Node::Environment.create(:foo, [path])
 
-    result = Puppet::FileServing::Content.indirection.find("modules/mymod/myfile")
+    result = Puppet::FileServing::Content.indirection.find("modules/mymod/myfile", :environment => env)
 
     result.should_not be_nil
     result.should be_instance_of(Puppet::FileServing::Content)
@@ -59,8 +58,8 @@ describe Puppet::Indirector::FileContent::FileServer, " when finding files" do
   end
 
   it "should find file content in files when node name expansions are used" do
-    FileTest.stubs(:exists?).returns true
-    FileTest.stubs(:exists?).with(Puppet[:fileserverconfig]).returns(true)
+    Puppet::FileSystem.stubs(:exist?).returns true
+    Puppet::FileSystem.stubs(:exist?).with(Puppet[:fileserverconfig]).returns(true)
 
     @path = tmpfile("file_server_testing")
 

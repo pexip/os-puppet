@@ -20,6 +20,8 @@ end
 
 describe Puppet::Agent do
   before do
+    Puppet::Status.indirection.stubs(:find).returns Puppet::Status.new("version" => Puppet.version)
+
     @agent = Puppet::Agent.new(AgentTestClient, false)
 
     # So we don't actually try to hit the filesystem.
@@ -133,18 +135,6 @@ describe Puppet::Agent do
       @agent.run
     end
 
-    it "should use a mutex to restrict multi-threading" do
-      client = AgentTestClient.new
-      AgentTestClient.expects(:new).returns client
-
-      mutex = mock 'mutex'
-      @agent.expects(:sync).returns mutex
-
-      mutex.expects(:synchronize)
-      client.expects(:run).never # if it doesn't run, then we know our yield is what triggers it
-      @agent.run
-    end
-
     it "should use a filesystem lock to restrict multiple processes running the agent" do
       client = AgentTestClient.new
       AgentTestClient.expects(:new).returns client
@@ -179,7 +169,7 @@ describe Puppet::Agent do
       @agent.run.should == :result
     end
 
-    describe "when should_fork is true" do
+    describe "when should_fork is true", :as_platform => :posix do
       before do
         @agent = Puppet::Agent.new(AgentTestClient, true)
 
@@ -233,6 +223,13 @@ describe Puppet::Agent do
         @agent.run_in_fork {
           777
         }
+      end
+    end
+
+    describe "on Windows", :as_platform => :windows do
+      it "should never fork" do
+        agent = Puppet::Agent.new(AgentTestClient, true)
+        expect(agent.should_fork).to be_false
       end
     end
   end

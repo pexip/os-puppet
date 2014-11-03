@@ -125,7 +125,7 @@ Puppet::Type.type(:augeas).provide(:augeas) do
           end
           fail("missing string argument #{narg} for #{cmd}") unless argline[-1]
         elsif f == :comparator
-          argline << sc.scan(/(==|!=|=~|<|<=|>|>=)/)
+          argline << sc.scan(/(==|!=|=~|<=|>=|<|>)/)
           unless argline[-1]
             puts sc.rest
             fail("invalid comparator for command #{cmd}")
@@ -169,9 +169,8 @@ Puppet::Type.type(:augeas).provide(:augeas) do
       if resource[:incl]
         aug.set("/augeas/load/Xfm/lens", resource[:lens])
         aug.set("/augeas/load/Xfm/incl", resource[:incl])
-        restricted = true
+        restricted_metadata = "/augeas//error"
       elsif glob_avail and opt_ctx
-        restricted = true
         # Optimize loading if the context is given, requires the glob function
         # from Augeas 0.8.2 or up
         ctx_path = resource[:context].sub(/^\/files(.*?)\/?$/, '\1/')
@@ -179,14 +178,14 @@ Puppet::Type.type(:augeas).provide(:augeas) do
 
         if aug.match(load_path).size < aug.match("/augeas/load/*").size
           aug.rm(load_path)
-          restricted = true
+          restricted_metadata = "/augeas/files#{ctx_path}/error"
         else
           # This will occur if the context is less specific than any glob
           debug("Unable to optimize files loaded by context path, no glob matches")
         end
       end
       aug.load
-      print_load_errors(:warning => restricted)
+      print_load_errors(restricted_metadata)
     end
     @aug
   end
@@ -196,6 +195,17 @@ Puppet::Type.type(:augeas).provide(:augeas) do
       @aug.close
       debug("Closed the augeas connection")
       @aug = nil
+    end
+  end
+
+  def is_numeric?(s)
+    case s
+    when Fixnum
+      true
+    when String
+      s.match(/\A[+-]?\d+?(\.\d+)?\Z/n) == nil ? false : true
+    else
+      false
     end
   end
 
@@ -214,10 +224,15 @@ Puppet::Type.type(:augeas).provide(:augeas) do
 
     #check the value in augeas
     result = @aug.get(path) || ''
-    case comparator
-    when "!="
+
+    if ['<', '<=', '>=', '>'].include? comparator and is_numeric?(result) and
+                                                      is_numeric?(arg)
+      resultf = result.to_f
+      argf = arg.to_f
+      return_value = (resultf.send(comparator, argf))
+    elsif comparator == "!="
       return_value = (result != arg)
-    when "=~"
+    elsif comparator == "=~"
       regex = Regexp.new(arg)
       return_value = (result =~ regex)
     else
@@ -293,7 +308,7 @@ Puppet::Type.type(:augeas).provide(:augeas) do
       load_path.flatten!
     end
 
-    if File.exists?("#{Puppet[:libdir]}/augeas/lenses")
+    if Puppet::FileSystem.exist?("#{Puppet[:libdir]}/augeas/lenses")
       load_path << "#{Puppet[:libdir]}/augeas/lenses"
     end
 
@@ -308,10 +323,10 @@ Puppet::Type.type(:augeas).provide(:augeas) do
     @aug.set("/augeas/save", mode)
   end
 
-  def print_load_errors(args={})
+  def print_load_errors(path)
     errors = @aug.match("/augeas//error")
     unless errors.empty?
-      if args[:warning]
+      if path && !@aug.match(path).empty?
         warning("Loading failed for one or more files, see debug for /augeas//error output")
       else
         debug("Loading failed for one or more files, output from /augeas//error:")
@@ -328,6 +343,8 @@ Puppet::Type.type(:augeas).provide(:augeas) do
 
   def print_errors(errors)
     errors.each do |errnode|
+      error = @aug.get(errnode)
+      debug("#{errnode} = #{error}") unless error.nil?
       @aug.match("#{errnode}/*").each do |subnode|
         subvalue = @aug.get(subnode)
         debug("#{subnode} = #{subvalue}")
@@ -335,7 +352,7 @@ Puppet::Type.type(:augeas).provide(:augeas) do
     end
   end
 
-  # Determines if augeas acutally needs to run.
+  # Determines if augeas actually needs to run.
   def need_to_run?
     force = resource[:force]
     return_value = true
@@ -368,7 +385,7 @@ Puppet::Type.type(:augeas).provide(:augeas) do
           save_result = @aug.save
           unless save_result
             print_put_errors
-            fail("Save failed with return code #{save_result}, see debug")
+            fail("Saving failed, see debug")
           end
 
           saved_files = @aug.match("/augeas/events/saved")
@@ -376,8 +393,8 @@ Puppet::Type.type(:augeas).provide(:augeas) do
             root = resource[:root].sub(/^\/$/, "")
             saved_files.map! {|key| @aug.get(key).sub(/^\/files/, root) }
             saved_files.uniq.each do |saved_file|
-              if Puppet[:show_diff]
-                notice "\n" + diff(saved_file, saved_file + ".augnew")
+              if Puppet[:show_diff] && @resource[:show_diff]
+                self.send(@resource[:loglevel], "\n" + diff(saved_file, saved_file + ".augnew"))
               end
               File.delete(saved_file + ".augnew")
             end
@@ -408,10 +425,10 @@ Puppet::Type.type(:augeas).provide(:augeas) do
     set_augeas_save_mode(SAVE_OVERWRITE) if versioncmp(get_augeas_version, "0.3.6") >= 0
     @aug.load
     do_execute_changes
-        unless @aug.save
-          print_put_errors
-          fail("Save failed with return code #{success}, see debug")
-        end
+    unless @aug.save
+      print_put_errors
+      fail("Save failed, see debug")
+    end
 
     :executed
   ensure

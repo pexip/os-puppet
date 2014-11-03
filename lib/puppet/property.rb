@@ -18,11 +18,11 @@ require 'puppet/parameter'
 # value _(should)_ is read and written with the methods {#value} and {#value=} which delegate to
 # {#should} and {#should=}, i.e. when a property is used like any other parameter, it is the _should_ value
 # that is operated on.
-# 
+#
 # All resource type properties in the puppet system are derived from this class.
 #
 # The intention is that new parameters are created by using the DSL method {Puppet::Type.newproperty}.
-# 
+#
 # @abstract
 # @note Properties of Types are expressed using subclasses of this class. Such a class describes one
 #   named property of a particular Type (as opposed to describing a type of property in general). This
@@ -35,12 +35,12 @@ require 'puppet/parameter'
 #
 # @todo Describe meta-parameter shadowing. This concept can not be understood by just looking at the descriptions
 #   of the methods involved.
-# 
+#
 # @see Puppet::Type
 # @see Puppet::Parameter
 #
 # @api public
-# 
+#
 class Puppet::Property < Puppet::Parameter
   require 'puppet/property/ensure'
 
@@ -52,9 +52,9 @@ class Puppet::Property < Puppet::Parameter
 
   # The noop mode for this property.
   # By setting a property's noop mode to `true`, any management of this property is inhibited. Calculation
-  # and reporting still takes place, but if a change of the underlying managed entity's state 
+  # and reporting still takes place, but if a change of the underlying managed entity's state
   # should take place it will not be carried out. This noop
-  # setting overrides the overall `Puppet[:noop]` mode as well as the noop mode in the _associated resource_ 
+  # setting overrides the overall `Puppet[:noop]` mode as well as the noop mode in the _associated resource_
   #
   attr_writer :noop
 
@@ -63,21 +63,21 @@ class Puppet::Property < Puppet::Parameter
     #   reads or writes this attribute.
     # ??? Probably Unused
     attr_accessor :unmanaged
-    
+
     # @return [Symbol] The name of the property as given when the property was created.
-    # 
+    #
     attr_reader :name
 
     # @!attribute [rw] array_matching
     # @comment note that $#46; is a period - char code require to not terminate sentence.
     # The `is` vs&#46; `should` array matching mode; `:first`, or `:all`.
-    # 
+    #
     # @comment there are two blank chars after the symbols to cause a break - do not remove these.
-    # * `:first`  
+    # * `:first`
     #   This is primarily used for single value properties. When matched against an array of values
     #   a match is true if the `is` value matches any of the values in the `should` array. When the `is` value
     #   is also an array, the matching is performed against the entire array as the `is` value.
-    # * `:all`  
+    # * `:all`
     #   : This is primarily used for multi-valued properties. When matched against an array of
     #     `should` values, the size of `is` and `should` must be the same, and all values in `is` must match
     #     a value in `should`.
@@ -104,7 +104,7 @@ class Puppet::Property < Puppet::Parameter
   end
 
   # Looks up a value's name among valid values, to enable option lookup with result as a key.
-  # @param name [Object] the parameter value to match against valid values (names). 
+  # @param name [Object] the parameter value to match against valid values (names).
   # @return {Symbol, Regexp} a value matching predicate
   # @api private
   #
@@ -142,6 +142,10 @@ class Puppet::Property < Puppet::Parameter
   #   was possible to specify a value of `:before` or `:after` for the purpose of calling
   #   both the block and the provider. Use of these deprecated options will now raise an exception later
   #   in the process when the _is_ value is set (see #set).
+  # @option options [Symbol] :invalidate_refreshes Indicates a change on this property should invalidate and
+  #   remove any scheduled refreshes (from notify or subscribe) targeted at the same resource. For example, if
+  #   a change in this property takes into account any changes that a scheduled refresh would have performed,
+  #   then the scheduled refresh would be deleted.
   # @option options [Object] any Any other option is treated as a call to a setter having the given
   #   option name (e.g. `:required_features` calls `required_features=` with the option's value as an
   #   argument).
@@ -160,7 +164,7 @@ class Puppet::Property < Puppet::Parameter
     value
   end
 
-  # Calls the provider setter method for this property with the given value as argument.  
+  # Calls the provider setter method for this property with the given value as argument.
   # @return [Object] what the provider returns when calling a setter for this property's name
   # @raise [Puppet::Error] when the provider can not handle this property.
   # @see #set
@@ -190,7 +194,7 @@ class Puppet::Property < Puppet::Parameter
   def call_valuemethod(name, value)
     if method = self.class.value_option(name, :method) and self.respond_to?(method)
       begin
-        event = self.send(method)
+        self.send(method)
       rescue Puppet::Error
         raise
       rescue => detail
@@ -227,7 +231,7 @@ class Puppet::Property < Puppet::Parameter
     rescue => detail
       message = "Could not convert change '#{name}' to string: #{detail}"
       Puppet.log_exception(detail, message)
-      raise Puppet::DevError, message
+      raise Puppet::DevError, message, detail.backtrace
     end
   end
 
@@ -254,18 +258,23 @@ class Puppet::Property < Puppet::Parameter
 
   # Produces an event describing a change of this property.
   # In addition to the event attributes set by the resource type, this method adds:
-  # 
+  #
   # * `:name` - the event_name
   # * `:desired_value` - a.k.a _should_ or _wanted value_
   # * `:property` - reference to this property
   # * `:source_description` - the _path_ (?? See todo)
+  # * `:invalidate_refreshes` - if scheduled refreshes should be invalidated
   #
   # @todo What is the intent of this method? What is the meaning of the :source_description passed in the
   #   options to the created event?
-  # @return [Puppet::Transaction::Event] the created event 
+  # @return [Puppet::Transaction::Event] the created event
   # @see Puppet::Type#event
   def event
-    resource.event :name => event_name, :desired_value => should, :property => self, :source_description => path
+    attrs = { :name => event_name, :desired_value => should, :property => self, :source_description => path }
+    if should and value = self.class.value_collection.match?(should)
+      attrs[:invalidate_refreshes] = true if value.invalidate_refreshes
+    end
+    resource.event attrs
   end
 
   # @todo What is this?
@@ -274,9 +283,9 @@ class Puppet::Property < Puppet::Parameter
 
   # Initializes a Property the same way as a Parameter and handles the special case when a property is shadowing a meta-parameter.
   # @todo There is some special initialization when a property is not a metaparameter but
-  #   Puppet::Type.metaparamclass(for this class's name) is not nil - if that is the case a 
+  #   Puppet::Type.metaparamclass(for this class's name) is not nil - if that is the case a
   #   setup_shadow is performed for that class.
-  # 
+  #
   # @param hash [Hash] options passed to the super initializer {Puppet::Parameter#initialize}
   # @note New properties of a type should be created via the DSL method {Puppet::Type.newproperty}.
   # @see Puppet::Parameter#initialize description of Parameter initialize options.
@@ -372,11 +381,11 @@ class Puppet::Property < Puppet::Parameter
 
   # Checks if the given current and desired values are equal.
   # This default implementation performs this check in a backwards compatible way where
-  # the equality of the two values is checked, and then the equality of current with desired 
+  # the equality of the two values is checked, and then the equality of current with desired
   # converted to a string.
-  # 
+  #
   # A derived implementation may override this method to perform a property specific equality check.
-  # 
+  #
   # The intent of this method is to provide an equality check suitable for checking if the property
   # value is in sync or not. It is typically called from {#insync?}.
   #
@@ -438,7 +447,7 @@ class Puppet::Property < Puppet::Parameter
   # the _associated resource_ and finally in Puppet[:noop].
   # @todo This logic is different than Parameter#noop in that the resource noop mode overrides
   #   the property's mode - in parameter it is the other way around. Bug or feature?
-  # 
+  #
   def noop
     # This is only here to make testing easier.
     if @resource.respond_to?(:noop?)
@@ -457,7 +466,7 @@ class Puppet::Property < Puppet::Parameter
   # same name as this property (i.e. if the property name is 'gid', a call to the
   # 'provider.gid' is expected to return the current value.
   # @return [Object] what the provider returns as the current value of the property
-  # 
+  #
   def retrieve
     provider.send(self.class.name)
   end
@@ -517,10 +526,10 @@ class Puppet::Property < Puppet::Parameter
   # If the _array matching mode_ {#match_all?} is true, an array of the wanted values in unmunged format
   # is returned, else the first value in the array of wanted values in unmunged format is returned.
   # @return [Array<Object>, Object, nil] Array of values if {#match_all?} else a single value, or nil if there are no
-  #   wanted values. 
+  #   wanted values.
   # @raise [Puppet::DevError] if the wanted value is non nil and not an array
   #
-  # @note This method will potentially return different values than the original values as they are 
+  # @note This method will potentially return different values than the original values as they are
   #   converted via munging/unmunging. If the original values are wanted, call {#shouldorig}.
   #
   # @see #shouldorig
@@ -565,8 +574,8 @@ class Puppet::Property < Puppet::Parameter
 
   # Synchronizes the current value _(is)_ and the wanted value _(should)_ by calling {#set}.
   # @raise [Puppet::DevError] if {#should} is nil
-  # @todo The implementation of this method is somewhat inefficient as it computes the should 
-  #  array twice. 
+  # @todo The implementation of this method is somewhat inefficient as it computes the should
+  #  array twice.
   def sync
     devfail "Got a nil value for should" unless should
     set(should)
@@ -587,7 +596,7 @@ class Puppet::Property < Puppet::Parameter
   # @raise [ArgumentError] if a required feature is not present
   # @return [void]
   # @api private
-  # 
+  #
   def validate_features_per_value(value)
     if features = self.class.value_option(self.class.value_name(value), :required_features)
       features = Array(features)
@@ -602,7 +611,7 @@ class Puppet::Property < Puppet::Parameter
   end
 
   # (see #should=)
-  def value=(value)
-    self.should = value
+  def value=(values)
+    self.should = values
   end
 end

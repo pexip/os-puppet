@@ -1,8 +1,20 @@
-puppet (3.1.1-1puppetlabs1) hardy lucid natty oneiric unstable sid squeeze wheezy precise; urgency=low
+puppet (3.7.3-1puppetlabs1) hardy lucid natty oneiric unstable sid squeeze wheezy precise; urgency=low
 
-  * Update to version 3.1.1-1puppetlabs1
+  * Update to version 3.7.3-1puppetlabs1
 
- -- Puppet Labs Release <info@puppetlabs.com>  Fri, 08 Mar 2013 15:01:49 -0800
+ -- Puppet Labs Release <info@puppetlabs.com>  Mon, 03 Nov 2014 14:23:20 -0800
+
+puppet (3.2.3-0.1rc0puppetlabs1) lucid unstable sid squeeze wheezy precise quantal raring; urgency=low
+
+  * Update ruby-rgen dependency to 0.6.5
+
+ -- Matthaus Owens <matthaus@puppetlabs.com>  Thu, 27 Jun 2013 14:45:14 +0000
+
+puppet (3.2.0-0.1rc0puppetlabs1) lucid oneiric precise unstable sid squeeze wheezy precise; urgency=low
+
+  * Add ruby-rgen dependency for new parser in Puppet 3.2
+
+ -- Matthaus Owens <matthaus@puppetlabs.com>  Fri, 12 Apr 2013 14:45:14 +0000
 
 puppet (3.1.0-0.1rc1puppetlabs1) lucid natty oneiric precise unstable sid squeeze wheezy precise; urgency=low
 

@@ -18,14 +18,7 @@ module Puppet::Util::SUIDManager
 
   def osx_maj_ver
     return @osx_maj_ver unless @osx_maj_ver.nil?
-    # 'kernel' is available without explicitly loading all facts
-    if Facter.value('kernel') != 'Darwin'
-      @osx_maj_ver = false
-      return @osx_maj_ver
-    end
-    # But 'macosx_productversion_major' requires it.
-    Facter.loadfacts
-    @osx_maj_ver = Facter.value('macosx_productversion_major')
+    @osx_maj_ver = Facter.value('macosx_productversion_major') || false
   end
   module_function :osx_maj_ver
 
@@ -178,7 +171,7 @@ module Puppet::Util::SUIDManager
   #   :custom_environment (default {}) -- a hash of key/value pairs to set as environment variables for the duration
   #     of the command
   def run_and_capture(command, new_uid=nil, new_gid=nil, options = {})
-
+    Puppet.deprecation_warning("Puppet::Util::SUIDManager.run_and_capture is deprecated; please use Puppet::Util::Execution.execute instead.")
     # specifying these here rather than in the method signature to allow callers to pass in a partial
     # set of overrides without affecting the default values for options that they don't pass in
     default_options = {

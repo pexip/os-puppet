@@ -2,6 +2,7 @@
 require 'spec_helper'
 
 require 'puppet/ssl/host'
+require 'matchers/json'
 
 def base_pson_comparison(result, pson_hash)
   result["fingerprint"].should == pson_hash["fingerprint"]
@@ -10,6 +11,7 @@ def base_pson_comparison(result, pson_hash)
 end
 
 describe Puppet::SSL::Host do
+  include JSONMatchers
   include PuppetSpec::Files
 
   before do
@@ -509,7 +511,7 @@ describe Puppet::SSL::Host do
     end
 
     it "should find the CA certificate if it does not have a certificate" do
-      Puppet::SSL::Certificate.indirection.expects(:find).with(Puppet::SSL::CA_NAME).returns mock("cacert")
+      Puppet::SSL::Certificate.indirection.expects(:find).with(Puppet::SSL::CA_NAME, :fail_on_404 => true).returns mock("cacert")
       Puppet::SSL::Certificate.indirection.stubs(:find).with("myname").returns @cert
       @host.certificate
     end
@@ -517,13 +519,13 @@ describe Puppet::SSL::Host do
     it "should not find the CA certificate if it is the CA host" do
       @host.expects(:ca?).returns true
       Puppet::SSL::Certificate.indirection.stubs(:find)
-      Puppet::SSL::Certificate.indirection.expects(:find).with(Puppet::SSL::CA_NAME).never
+      Puppet::SSL::Certificate.indirection.expects(:find).with(Puppet::SSL::CA_NAME, :fail_on_404 => true).never
 
       @host.certificate
     end
 
     it "should return nil if it cannot find a CA certificate" do
-      Puppet::SSL::Certificate.indirection.expects(:find).with(Puppet::SSL::CA_NAME).returns nil
+      Puppet::SSL::Certificate.indirection.expects(:find).with(Puppet::SSL::CA_NAME, :fail_on_404 => true).returns nil
       Puppet::SSL::Certificate.indirection.expects(:find).with("myname").never
 
       @host.certificate.should be_nil
@@ -543,13 +545,13 @@ describe Puppet::SSL::Host do
     end
 
     it "should find the certificate in the Certificate class and return the Puppet certificate instance" do
-      Puppet::SSL::Certificate.indirection.expects(:find).with(Puppet::SSL::CA_NAME).returns mock("cacert")
+      Puppet::SSL::Certificate.indirection.expects(:find).with(Puppet::SSL::CA_NAME, :fail_on_404 => true).returns mock("cacert")
       Puppet::SSL::Certificate.indirection.expects(:find).with("myname").returns @cert
       @host.certificate.should equal(@cert)
     end
 
     it "should return any previously found certificate" do
-      Puppet::SSL::Certificate.indirection.expects(:find).with(Puppet::SSL::CA_NAME).returns mock("cacert")
+      Puppet::SSL::Certificate.indirection.expects(:find).with(Puppet::SSL::CA_NAME, :fail_on_404 => true).returns mock("cacert")
       Puppet::SSL::Certificate.indirection.expects(:find).with("myname").returns(@cert).once
 
       @host.certificate.should equal(@cert)
@@ -710,17 +712,38 @@ describe Puppet::SSL::Host do
       before do
         @crl = stub 'crl', :content => "real_crl"
         Puppet::SSL::CertificateRevocationList.indirection.stubs(:find).returns @crl
-        Puppet[:certificate_revocation] = true
       end
 
-      it "should add the CRL" do
-        @store.expects(:add_crl).with "real_crl"
-        @host.ssl_store
+      describe "and 'certificate_revocation' is true" do
+        before do
+          Puppet[:certificate_revocation] = true
+        end
+
+        it "should add the CRL" do
+          @store.expects(:add_crl).with "real_crl"
+          @host.ssl_store
+        end
+
+        it "should set the flags to OpenSSL::X509::V_FLAG_CRL_CHECK_ALL|OpenSSL::X509::V_FLAG_CRL_CHECK" do
+          @store.expects(:flags=).with OpenSSL::X509::V_FLAG_CRL_CHECK_ALL|OpenSSL::X509::V_FLAG_CRL_CHECK
+          @host.ssl_store
+        end
       end
 
-      it "should set the flags to OpenSSL::X509::V_FLAG_CRL_CHECK_ALL|OpenSSL::X509::V_FLAG_CRL_CHECK" do
-        @store.expects(:flags=).with OpenSSL::X509::V_FLAG_CRL_CHECK_ALL|OpenSSL::X509::V_FLAG_CRL_CHECK
-        @host.ssl_store
+      describe "and 'certificate_revocation' is false" do
+        before do
+          Puppet[:certificate_revocation] = false
+        end
+
+        it "should not add the CRL" do
+          @store.expects(:add_crl).never
+          @host.ssl_store
+        end
+
+        it "should not set the flags" do
+          @store.expects(:flags=).never
+          @host.ssl_store
+        end
       end
     end
   end
@@ -802,7 +825,7 @@ describe Puppet::SSL::Host do
       let(:host) do
         Puppet::SSL::Host.new("bazinga")
       end
-      
+
       let(:pson_hash) do
         {
           "fingerprint"   => host.certificate_request.fingerprint,
@@ -810,15 +833,21 @@ describe Puppet::SSL::Host do
           "name"          => host.name
         }
       end
-      
+
       it "should be able to identify a host with an unsigned certificate request" do
         host.generate_certificate_request
 
         result = PSON.parse(Puppet::SSL::Host.new(host.name).to_pson)
-        
+
         base_pson_comparison result, pson_hash
       end
-      
+
+      it "should validate against the schema" do
+        host.generate_certificate_request
+
+        expect(host.to_pson).to validate_against('api/schemas/host.json')
+      end
+
       describe "explicit fingerprints" do
         [:SHA1, :SHA256, :SHA512].each do |md|
           it "should include #{md}" do
@@ -833,7 +862,7 @@ describe Puppet::SSL::Host do
           end
         end
       end
-      
+
       describe "dns_alt_names" do
         describe "when not specified" do
           it "should include the dns_alt_names associated with the certificate" do
@@ -846,22 +875,28 @@ describe Puppet::SSL::Host do
           end
         end
 
-        [ "", 
+        [ "",
           "test, alt, names"
         ].each do |alt_names|
           describe "when #{alt_names}" do
-            it "should include the dns_alt_names associated with the certificate" do
+            before(:each) do
               host.generate_certificate_request :dns_alt_names => alt_names
+            end
+
+            it "should include the dns_alt_names associated with the certificate" do
               pson_hash["desired_alt_names"] = host.certificate_request.subject_alt_names
 
               result = PSON.parse(Puppet::SSL::Host.new(host.name).to_pson)
               base_pson_comparison result, pson_hash
               result["dns_alt_names"].should == pson_hash["desired_alt_names"]
             end
+
+            it "should validate against the schema" do
+              expect(host.to_pson).to validate_against('api/schemas/host.json')
+            end
           end
         end
       end
-      
 
       it "should be able to identify a host with a signed certificate" do
         host.generate_certificate_request
@@ -896,7 +931,7 @@ describe Puppet::SSL::Host do
           "name"  => host.name,
           "desired_state" => host.desired_state,
         }
-        generated_host = Puppet::SSL::Host.from_pson(pson_hash)
+        generated_host = Puppet::SSL::Host.from_data_hash(pson_hash)
         generated_host.desired_state.should == host.desired_state
         generated_host.name.should == host.name
       end

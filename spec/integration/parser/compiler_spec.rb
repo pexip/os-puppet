@@ -1,16 +1,18 @@
 #! /usr/bin/env ruby
 require 'spec_helper'
+require 'puppet/parser/parser_factory'
+require 'puppet_spec/compiler'
+require 'matchers/resource'
 
-describe Puppet::Parser::Compiler do
+describe "Puppet::Parser::Compiler" do
+  include PuppetSpec::Compiler
+  include Matchers::Resource
+
   before :each do
     @node = Puppet::Node.new "testnode"
 
     @scope_resource = stub 'scope_resource', :builtin? => true, :finish => nil, :ref => 'Class[main]'
     @scope = stub 'scope', :resource => @scope_resource, :source => mock("source")
-  end
-
-  after do
-    Puppet.settings.clear
   end
 
   it "should be able to determine the configuration version from a local version control repository" do
@@ -21,7 +23,7 @@ describe Puppet::Parser::Compiler do
 
       Puppet.settings[:config_version] = 'git rev-parse HEAD'
 
-      @parser = Puppet::Parser::Parser.new "development"
+      @parser = Puppet::Parser::ParserFactory.parser "development"
       @compiler = Puppet::Parser::Compiler.new(@node)
 
       @compiler.catalog.version.should == version
@@ -131,7 +133,7 @@ describe Puppet::Parser::Compiler do
   end
 
   ['class', 'define', 'node'].each do |thing|
-    it "should not allow #{thing} inside evaluated conditional constructs" do
+    it "should not allow '#{thing}' inside evaluated conditional constructs" do
       Puppet[:code] = <<-PP
         if true {
           #{thing} foo {
@@ -169,10 +171,10 @@ describe Puppet::Parser::Compiler do
     let(:code) do
       <<-MANIFEST
         file { [a,b,c]:
-          mode => 0644,
+          mode => '0644',
         }
         file { [d,e]:
-          mode => 0755,
+          mode => '0755',
         }
       MANIFEST
     end
@@ -184,7 +186,7 @@ describe Puppet::Parser::Compiler do
     end
 
     after :each do
-      catalog = described_class.compile(node)
+      catalog = Puppet::Parser::Compiler.compile(node)
 
       resources = catalog.resources.select { |res| res.type == 'File' }
 
@@ -304,6 +306,220 @@ describe Puppet::Parser::Compiler do
 
       expected_relationships << ['a', 'b'] << ['d', 'c']
       expected_subscriptions << ['b', 'c'] << ['e', 'd']
+    end
+  end
+
+  context 'when working with immutable node data' do
+    context 'and have opted in to immutable_node_data' do
+      before :each do
+        Puppet[:immutable_node_data] = true
+      end
+
+      def node_with_facts(facts)
+        Puppet[:facts_terminus] = :memory
+        Puppet::Node::Facts.indirection.save(Puppet::Node::Facts.new("testing", facts))
+        node = Puppet::Node.new("testing")
+        node.fact_merge
+        node
+      end
+
+      matcher :fail_compile_with do |node, message_regex|
+        match do |manifest|
+          @error = nil
+          begin
+            PuppetSpec::Compiler.compile_to_catalog(manifest, node)
+            false
+          rescue Puppet::Error => e
+            @error = e
+            message_regex.match(e.message)
+          end
+        end
+
+        failure_message_for_should do
+          if @error
+            "failed with #{@error}\n#{@error.backtrace}"
+          else
+            "did not fail"
+          end
+        end
+      end
+
+      it 'should make $facts available' do
+        node = node_with_facts('the_facts' => 'straight')
+
+        catalog = compile_to_catalog(<<-MANIFEST, node)
+         notify { 'test': message => $facts[the_facts] }
+        MANIFEST
+
+        catalog.resource("Notify[test]")[:message].should == "straight"
+      end
+
+      it 'should make $facts reserved' do
+        node = node_with_facts('the_facts' => 'straight')
+
+        expect('$facts = {}').to fail_compile_with(node, /assign to a reserved variable name: 'facts'/)
+        expect('class a { $facts = {} } include a').to fail_compile_with(node, /assign to a reserved variable name: 'facts'/)
+      end
+
+      it 'should make $facts immutable' do
+        node = node_with_facts('string' => 'value', 'array' => ['string'], 'hash' => { 'a' => 'string' }, 'number' => 1, 'boolean' => true)
+
+        expect('$i=inline_template("<% @facts[%q{new}] = 2 %>")').to fail_compile_with(node, /frozen Hash/i)
+        expect('$i=inline_template("<% @facts[%q{string}].chop! %>")').to fail_compile_with(node, /frozen String/i)
+
+        expect('$i=inline_template("<% @facts[%q{array}][0].chop! %>")').to fail_compile_with(node, /frozen String/i)
+        expect('$i=inline_template("<% @facts[%q{array}][1] = 2 %>")').to fail_compile_with(node, /frozen Array/i)
+
+        expect('$i=inline_template("<% @facts[%q{hash}][%q{a}].chop! %>")').to fail_compile_with(node, /frozen String/i)
+        expect('$i=inline_template("<% @facts[%q{hash}][%q{b}] = 2 %>")').to fail_compile_with(node, /frozen Hash/i)
+      end
+
+      it 'should make $facts available even if there are no facts' do
+        Puppet[:facts_terminus] = :memory
+        node = Puppet::Node.new("testing2")
+        node.fact_merge
+
+        catalog = compile_to_catalog(<<-MANIFEST, node)
+          notify { 'test': message => $facts }
+        MANIFEST
+
+        expect(catalog).to have_resource("Notify[test]").with_parameter(:message, {})
+      end
+    end
+
+    context 'and have not opted in to immutable_node_data' do
+      before :each do
+        Puppet[:immutable_node_data] = false
+      end
+
+      it 'should not make $facts available' do
+       Puppet[:facts_terminus] = :memory
+       facts = Puppet::Node::Facts.new("testing", 'the_facts' => 'straight')
+       Puppet::Node::Facts.indirection.save(facts)
+       node = Puppet::Node.new("testing")
+       node.fact_merge
+
+        catalog = compile_to_catalog(<<-MANIFEST, node)
+          notify { 'test': message => "An $facts space" }
+        MANIFEST
+
+        catalog.resource("Notify[test]")[:message].should == "An  space"
+      end
+    end
+  end
+
+  context 'when working with the trusted data hash' do
+    context 'and have opted in to trusted_node_data' do
+      before :each do
+        Puppet[:trusted_node_data] = true
+      end
+
+      it 'should make $trusted available' do
+        node = Puppet::Node.new("testing")
+        node.trusted_data = { "data" => "value" }
+
+        catalog = compile_to_catalog(<<-MANIFEST, node)
+          notify { 'test': message => $trusted[data] }
+        MANIFEST
+
+        catalog.resource("Notify[test]")[:message].should == "value"
+      end
+
+      it 'should not allow assignment to $trusted' do
+        node = Puppet::Node.new("testing")
+        node.trusted_data = { "data" => "value" }
+
+        expect do
+          catalog = compile_to_catalog(<<-MANIFEST, node)
+            $trusted = 'changed'
+            notify { 'test': message => $trusted == 'changed' }
+          MANIFEST
+          catalog.resource("Notify[test]")[:message].should == true
+        end.to raise_error(Puppet::Error, /Attempt to assign to a reserved variable name: 'trusted'/)
+      end
+
+      it 'should not allow addition to $trusted hash' do
+        node = Puppet::Node.new("testing")
+        node.trusted_data = { "data" => "value" }
+
+        expect do
+          catalog = compile_to_catalog(<<-MANIFEST, node)
+            $trusted['extra'] = 'added'
+            notify { 'test': message => $trusted['extra'] == 'added' }
+          MANIFEST
+          catalog.resource("Notify[test]")[:message].should == true
+          # different errors depending on regular or future parser
+        end.to raise_error(Puppet::Error, /(can't modify frozen [hH]ash)|(Illegal attempt to assign)/)
+      end
+
+      it 'should not allow addition to $trusted hash via Ruby inline template' do
+        node = Puppet::Node.new("testing")
+        node.trusted_data = { "data" => "value" }
+
+        expect do
+          catalog = compile_to_catalog(<<-MANIFEST, node)
+          $dummy = inline_template("<% @trusted['extra'] = 'added' %> lol")
+            notify { 'test': message => $trusted['extra'] == 'added' }
+          MANIFEST
+          catalog.resource("Notify[test]")[:message].should == true
+        end.to raise_error(Puppet::Error, /can't modify frozen [hH]ash/)
+      end
+    end
+
+    context 'and have not opted in to trusted_node_data' do
+      before :each do
+        Puppet[:trusted_node_data] = false
+      end
+
+      it 'should not make $trusted available' do
+        node = Puppet::Node.new("testing")
+        node.trusted_data = { "data" => "value" }
+
+        catalog = compile_to_catalog(<<-MANIFEST, node)
+          notify { 'test': message => $trusted == undef }
+        MANIFEST
+
+        catalog.resource("Notify[test]")[:message].should == true
+      end
+
+      it 'should allow assignment to $trusted' do
+        node = Puppet::Node.new("testing")
+
+        catalog = compile_to_catalog(<<-MANIFEST, node)
+          $trusted = 'changed'
+          notify { 'test': message => $trusted == 'changed' }
+        MANIFEST
+
+        catalog.resource("Notify[test]")[:message].should == true
+      end
+    end
+  end
+
+  context 'when evaluating collection' do
+    it 'matches on container inherited tags' do
+      Puppet[:code] = <<-MANIFEST
+      class xport_test {
+        tag 'foo_bar'
+        @notify { 'nbr1':
+          message => 'explicitly tagged',
+          tag => 'foo_bar'
+        }
+
+        @notify { 'nbr2':
+          message => 'implicitly tagged'
+        }
+
+        Notify <| tag == 'foo_bar' |> {
+          message => 'overridden'
+        }
+      }
+      include xport_test
+      MANIFEST
+
+      catalog = Puppet::Parser::Compiler.compile(Puppet::Node.new("mynode"))
+
+      expect(catalog).to have_resource("Notify[nbr1]").with_parameter(:message, 'overridden')
+      expect(catalog).to have_resource("Notify[nbr2]").with_parameter(:message, 'overridden')
     end
   end
 end

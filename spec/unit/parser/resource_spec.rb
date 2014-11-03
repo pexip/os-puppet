@@ -1,15 +1,11 @@
-#! /usr/bin/env ruby
 require 'spec_helper'
-
-# LAK: FIXME This is just new tests for resources; I have
-# not moved all tests over yet.
 
 describe Puppet::Parser::Resource do
   before do
-    @node = Puppet::Node.new("yaynode")
-    @known_resource_types = Puppet::Resource::TypeCollection.new("env")
+    environment = Puppet::Node::Environment.create(:testing, [])
+    @node = Puppet::Node.new("yaynode", :environment => environment)
+    @known_resource_types = environment.known_resource_types
     @compiler = Puppet::Parser::Compiler.new(@node)
-    @compiler.environment.stubs(:known_resource_types).returns @known_resource_types
     @source = newclass ""
     @scope = @compiler.topscope
   end
@@ -82,7 +78,7 @@ describe Puppet::Parser::Resource do
     @resource = Puppet::Parser::Resource.new("whatever", "whatever", :scope => @scope, :source => @source).isomorphic?.should be_true
   end
 
-  it "should have a array-indexing method for retrieving parameter values" do
+  it "should have an array-indexing method for retrieving parameter values" do
     @resource = mkresource
     @resource[:one].should == "yay"
   end
@@ -90,7 +86,7 @@ describe Puppet::Parser::Resource do
   it "should use a Puppet::Resource for converting to a ral resource" do
     trans = mock 'resource', :to_ral => "yay"
     @resource = mkresource
-    @resource.expects(:to_resource).returns trans
+    @resource.expects(:copy_as_resource).returns trans
     @resource.to_ral.should == "yay"
   end
 
@@ -124,14 +120,13 @@ describe Puppet::Parser::Resource do
       tags = [ "tag1", "tag2" ]
       @arguments[:parameters] = [ param(:tag, tags , :source) ]
       res = Puppet::Parser::Resource.new("resource", "testing", @arguments)
-      (res.tags & tags).should == tags
+      res.should be_tagged("tag1")
+      res.should be_tagged("tag2")
     end
   end
 
   describe "when evaluating" do
     before do
-      @node = Puppet::Node.new "test-node"
-      @compiler = Puppet::Parser::Compiler.new @node
       @catalog = Puppet::Resource::Catalog.new
       source = stub('source')
       source.stubs(:module_name)
@@ -181,7 +176,7 @@ describe Puppet::Parser::Resource do
       resource = Puppet::Parser::Resource.new(:class, "foo", :scope => @scope, :catalog => @catalog)
       resource[:stage] = 'other'
 
-      lambda { resource.evaluate }.should raise_error(ArgumentError, /Could not find stage other specified by/)
+      expect { resource.evaluate }.to raise_error(ArgumentError, /Could not find stage other specified by/)
     end
 
     it "should add edges from the class resources to the parent's stage if no stage is specified" do
@@ -328,19 +323,19 @@ describe Puppet::Parser::Resource do
     end
 
     it "should fail on tags containing '*' characters" do
-      lambda { @resource.tag("bad*tag") }.should raise_error(Puppet::ParseError)
+      expect { @resource.tag("bad*tag") }.to raise_error(Puppet::ParseError)
     end
 
     it "should fail on tags starting with '-' characters" do
-      lambda { @resource.tag("-badtag") }.should raise_error(Puppet::ParseError)
+      expect { @resource.tag("-badtag") }.to raise_error(Puppet::ParseError)
     end
 
     it "should fail on tags containing ' ' characters" do
-      lambda { @resource.tag("bad tag") }.should raise_error(Puppet::ParseError)
+      expect { @resource.tag("bad tag") }.to raise_error(Puppet::ParseError)
     end
 
     it "should allow alpha tags" do
-      lambda { @resource.tag("good_tag") }.should_not raise_error(Puppet::ParseError)
+      expect { @resource.tag("good_tag") }.to_not raise_error
     end
   end
 
@@ -354,7 +349,7 @@ describe Puppet::Parser::Resource do
     it "should fail when the override was not created by a parent class" do
       @override.source = "source2"
       @override.source.expects(:child_of?).with("source1").returns(false)
-      lambda { @resource.merge(@override) }.should raise_error(Puppet::ParseError)
+      expect { @resource.merge(@override) }.to raise_error(Puppet::ParseError)
     end
 
     it "should succeed when the override was created in the current scope" do
@@ -445,7 +440,7 @@ describe Puppet::Parser::Resource do
   it "should be able to be converted to a normal resource" do
     @source = stub 'scope', :name => "myscope"
     @resource = mkresource :source => @source
-    @resource.should respond_to(:to_resource)
+    @resource.should respond_to(:copy_as_resource)
   end
 
   describe "when being converted to a resource" do
@@ -454,19 +449,19 @@ describe Puppet::Parser::Resource do
     end
 
     it "should create an instance of Puppet::Resource" do
-      @parser_resource.to_resource.should be_instance_of(Puppet::Resource)
+      @parser_resource.copy_as_resource.should be_instance_of(Puppet::Resource)
     end
 
     it "should set the type correctly on the Puppet::Resource" do
-      @parser_resource.to_resource.type.should == @parser_resource.type
+      @parser_resource.copy_as_resource.type.should == @parser_resource.type
     end
 
     it "should set the title correctly on the Puppet::Resource" do
-      @parser_resource.to_resource.title.should == @parser_resource.title
+      @parser_resource.copy_as_resource.title.should == @parser_resource.title
     end
 
     it "should copy over all of the parameters" do
-      result = @parser_resource.to_resource.to_hash
+      result = @parser_resource.copy_as_resource.to_hash
 
       # The name will be in here, also.
       result[:foo].should == "bar"
@@ -477,40 +472,40 @@ describe Puppet::Parser::Resource do
       @parser_resource.tag "foo"
       @parser_resource.tag "bar"
 
-      @parser_resource.to_resource.tags.should == @parser_resource.tags
+      @parser_resource.copy_as_resource.tags.should == @parser_resource.tags
     end
 
     it "should copy over the line" do
       @parser_resource.line = 40
-      @parser_resource.to_resource.line.should == 40
+      @parser_resource.copy_as_resource.line.should == 40
     end
 
     it "should copy over the file" do
       @parser_resource.file = "/my/file"
-      @parser_resource.to_resource.file.should == "/my/file"
+      @parser_resource.copy_as_resource.file.should == "/my/file"
     end
 
     it "should copy over the 'exported' value" do
       @parser_resource.exported = true
-      @parser_resource.to_resource.exported.should be_true
+      @parser_resource.copy_as_resource.exported.should be_true
     end
 
     it "should copy over the 'virtual' value" do
       @parser_resource.virtual = true
-      @parser_resource.to_resource.virtual.should be_true
+      @parser_resource.copy_as_resource.virtual.should be_true
     end
 
     it "should convert any parser resource references to Puppet::Resource instances" do
       ref = Puppet::Resource.new("file", "/my/file")
       @parser_resource = mkresource :source => @source, :parameters => {:foo => "bar", :fee => ref}
-      result = @parser_resource.to_resource
+      result = @parser_resource.copy_as_resource
       result[:fee].should == Puppet::Resource.new(:file, "/my/file")
     end
 
     it "should convert any parser resource references to Puppet::Resource instances even if they are in an array" do
       ref = Puppet::Resource.new("file", "/my/file")
       @parser_resource = mkresource :source => @source, :parameters => {:foo => "bar", :fee => ["a", ref]}
-      result = @parser_resource.to_resource
+      result = @parser_resource.copy_as_resource
       result[:fee].should == ["a", Puppet::Resource.new(:file, "/my/file")]
     end
 
@@ -518,7 +513,7 @@ describe Puppet::Parser::Resource do
       ref1 = Puppet::Resource.new("file", "/my/file1")
       ref2 = Puppet::Resource.new("file", "/my/file2")
       @parser_resource = mkresource :source => @source, :parameters => {:foo => "bar", :fee => ["a", [ref1,ref2]]}
-      result = @parser_resource.to_resource
+      result = @parser_resource.copy_as_resource
       result[:fee].should == ["a", Puppet::Resource.new(:file, "/my/file1"), Puppet::Resource.new(:file, "/my/file2")]
     end
 
@@ -550,7 +545,7 @@ describe Puppet::Parser::Resource do
       resource = Puppet::Parser::Resource.new :foo, "bar", :scope => @scope, :source => stub("source")
       resource[:one] = :two
       resource.expects(:validate_parameter).with(:one).raises ArgumentError
-      lambda { resource.send(:validate) }.should raise_error(Puppet::ParseError)
+      expect { resource.send(:validate) }.to raise_error(Puppet::ParseError)
     end
   end
 
@@ -564,10 +559,6 @@ describe Puppet::Parser::Resource do
       param = Puppet::Parser::Resource::Param.new :name => "foo", :value => "bar", :source => @source
       @resource.set_parameter(param)
       @resource["foo"].should == "bar"
-    end
-
-    it "should fail when provided a parameter name but no value" do
-      lambda { @resource.set_parameter("myparam") }.should raise_error(ArgumentError)
     end
 
     it "should allow parameters to be set to 'false'" do

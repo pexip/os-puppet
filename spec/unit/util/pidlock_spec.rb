@@ -45,10 +45,33 @@ describe Puppet::Util::Pidlock do
       @lock.lock.should be_true
     end
 
-
     it "should create a lock file" do
       @lock.lock
-      File.should be_exists(@lockfile)
+      Puppet::FileSystem.exist?(@lockfile).should be_true
+    end
+
+    it 'should create an empty lock file even when pid is missing' do
+      Process.stubs(:pid).returns('')
+      @lock.lock
+      Puppet::FileSystem.exist?(@lock.file_path).should be_true
+      Puppet::FileSystem.read(@lock.file_path).should be_empty
+    end
+
+    it 'should replace an existing empty lockfile with a pid, given a subsequent lock call made against a valid pid' do
+      # empty pid results in empty lockfile
+      Process.stubs(:pid).returns('')
+      @lock.lock
+      Puppet::FileSystem.exist?(@lock.file_path).should be_true
+
+      # next lock call with valid pid kills existing empty lockfile
+      Process.stubs(:pid).returns(1234)
+      @lock.lock
+      Puppet::FileSystem.exist?(@lock.file_path).should be_true
+      Puppet::FileSystem.read(@lock.file_path).should == '1234'
+    end
+
+    it "should expose the lock file_path" do
+      @lock.file_path.should == @lockfile
     end
   end
 
@@ -71,7 +94,7 @@ describe Puppet::Util::Pidlock do
     it "should get rid of the lock file" do
       @lock.lock
       @lock.unlock
-      File.should_not be_exists(@lockfile)
+      Puppet::FileSystem.exist?(@lockfile).should be_false
     end
   end
 
@@ -79,6 +102,22 @@ describe Puppet::Util::Pidlock do
     it "should return true if locked" do
       @lock.lock
       @lock.should be_locked
+    end
+
+    it "should remove the lockfile when pid is missing" do
+      Process.stubs(:pid).returns('')
+      @lock.lock
+      @lock.locked?.should be_false
+      Puppet::FileSystem.exist?(@lock.file_path).should be_false
+    end
+  end
+
+  describe '#lock_pid' do
+    it 'should return nil if the pid is empty' do
+      # fake pid to get empty lockfile
+      Process.stubs(:pid).returns('')
+      @lock.lock
+      @lock.lock_pid.should == nil
     end
   end
 
@@ -102,13 +141,13 @@ describe Puppet::Util::Pidlock do
 
     describe "#lock" do
       it "should clear stale locks" do
-        @lock.locked?
-        File.should_not be_exists(@lockfile)
+        @lock.locked?.should be_false
+        Puppet::FileSystem.exist?(@lockfile).should be_false
       end
 
       it "should replace with new locks" do
         @lock.lock
-        File.should be_exists(@lockfile)
+        Puppet::FileSystem.exist?(@lockfile).should be_true
         @lock.lock_pid.should == 6789
         @lock.should be_mine
         @lock.should be_locked
@@ -122,7 +161,7 @@ describe Puppet::Util::Pidlock do
 
       it "should not remove the lock file" do
         @lock.unlock
-        File.should be_exists(@lockfile)
+        Puppet::FileSystem.exist?(@lockfile).should be_true
       end
     end
   end
@@ -167,7 +206,7 @@ describe Puppet::Util::Pidlock do
 
       it "should not remove the lock file" do
         @lock.unlock
-        File.should be_exists(@lockfile)
+        Puppet::FileSystem.exist?(@lockfile).should be_true
       end
 
       it "should still not be our lock" do

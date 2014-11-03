@@ -10,7 +10,10 @@ class Puppet::SSL::Certificate < Puppet::SSL::Base
   wraps OpenSSL::X509::Certificate
 
   extend Puppet::Indirector
-  indirects :certificate, :terminus_class => :file
+  indirects :certificate, :terminus_class => :file, :doc => <<DOC
+    This indirection wraps an `OpenSSL::X509::Certificate` object, representing a certificate (signed public key).
+    The indirection key is the certificate CN (generally a hostname).
+DOC
 
   # Because of how the format handler class is included, this
   # can't be in the base class.
@@ -40,5 +43,23 @@ class Puppet::SSL::Certificate < Puppet::SSL::Base
   # to the constructor, so it's not downcased
   def unmunged_name
     self.class.name_from_subject(content.subject)
+  end
+
+  # Any extensions registered with custom OIDs as defined in module
+  # Puppet::SSL::Oids may be looked up here.
+  #
+  # A cert with a 'pp_uuid' extension having the value 'abcd' would return:
+  #
+  # [{ 'oid' => 'pp_uuid', 'value' => 'abcd'}]
+  #
+  # @return [Array<Hash{String => String}>] An array of two element hashes,
+  # with key/value pairs for the extension's oid, and its value.
+  def custom_extensions
+    custom_exts = content.extensions.select do |ext|
+      Puppet::SSL::Oids.subtree_of?('ppRegCertExt', ext.oid) or
+        Puppet::SSL::Oids.subtree_of?('ppPrivCertExt', ext.oid)
+    end
+
+    custom_exts.map { |ext| {'oid' => ext.oid, 'value' => ext.value} }
   end
 end
