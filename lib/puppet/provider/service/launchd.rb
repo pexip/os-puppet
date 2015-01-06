@@ -112,40 +112,51 @@ Puppet::Type.type(:service).provide :launchd, :parent => :base do
     array_of_files.compact
   end
 
+  # Get a hash of all launchd plists, keyed by label.  This value is cached, but
+  # the cache will be refreshed if refresh is true.
+  #
+  # @api private
+  def self.make_label_to_path_map(refresh=false)
+    return @label_to_path_map if @label_to_path_map and not refresh
+    @label_to_path_map = {}
+    launchd_paths.each do |path|
+      return_globbed_list_of_file_paths(path).each do |filepath|
+        job = read_plist(filepath)
+        next if job.nil?
+        if job.has_key?("Label")
+          @label_to_path_map[job["Label"]] = filepath
+        else
+          Puppet.warning("The #{filepath} plist does not contain a 'label' key; " +
+                       "Puppet is skipping it")
+          next
+        end
+      end
+    end
+    @label_to_path_map
+  end
+
   # Sets a class instance variable with a hash of all launchd plist files that
   # are found on the system. The key of the hash is the job id and the value
   # is the path to the file. If a label is passed, we return the job id and
   # path for that specific job.
   def self.jobsearch(label=nil)
-    @label_to_path_map ||= {}
-    if @label_to_path_map.empty?
-      launchd_paths.each do |path|
-        return_globbed_list_of_file_paths(path).each do |filepath|
-          job = read_plist(filepath)
-          next if job.nil?
-          if job.has_key?("Label")
-            if job["Label"] == label
-              return { label => filepath }
-            else
-              @label_to_path_map[job["Label"]] = filepath
-            end
-          else
-            Puppet.warning("The #{filepath} plist does not contain a 'label' key; " +
-                         "Puppet is skipping it")
-            next
-          end
-        end
-      end
-    end
+    by_label = make_label_to_path_map
 
     if label
-      if @label_to_path_map.has_key? label
-        return { label => @label_to_path_map[label] }
+      if by_label.has_key? label
+        return { label => by_label[label] }
       else
-        raise Puppet::Error.new("Unable to find launchd plist for job: #{label}")
+        # try refreshing the map, in case a plist has been added in the interim
+        by_label = make_label_to_path_map(true)
+        if by_label.has_key? label
+          return { label => by_label[label] }
+        else
+          raise Puppet::Error, "Unable to find launchd plist for job: #{label}"
+        end
       end
     else
-      @label_to_path_map
+      # caller wants the whole map
+      by_label
     end
   end
 
@@ -160,13 +171,13 @@ Puppet::Type.type(:service).provide :launchd, :parent => :base do
         @job_list[line.split(/\s/).last] = :running
       end
     rescue Puppet::ExecutionFailure
-      raise Puppet::Error.new("Unable to determine status of #{resource[:name]}")
+      raise Puppet::Error.new("Unable to determine status of #{resource[:name]}", $!)
     end
     @job_list
   end
 
   # Launchd implemented plist overrides in version 10.6.
-  # This method checks the major_version of OS X and returns true if 
+  # This method checks the major_version of OS X and returns true if
   # it is 10.6 or greater. This allows us to implement different plist
   # behavior for versions >= 10.6
   def has_macosx_plist_overrides?
@@ -202,16 +213,13 @@ Puppet::Type.type(:service).provide :launchd, :parent => :base do
   def self.get_macosx_version_major
     return @macosx_version_major if @macosx_version_major
     begin
-      # Make sure we've loaded all of the facts
-      Facter.loadfacts
-
       product_version_major = Facter.value(:macosx_productversion_major)
 
       fail("#{product_version_major} is not supported by the launchd provider") if %w{10.0 10.1 10.2 10.3 10.4}.include?(product_version_major)
       @macosx_version_major = product_version_major
       return @macosx_version_major
     rescue Puppet::ExecutionFailure => detail
-      fail("Could not determine OS X version: #{detail}")
+      self.fail Puppet::Error, "Could not determine OS X version: #{detail}", detail
     end
   end
 
@@ -246,7 +254,7 @@ Puppet::Type.type(:service).provide :launchd, :parent => :base do
     begin
       execute(cmds)
     rescue Puppet::ExecutionFailure
-      raise Puppet::Error.new("Unable to start service: #{resource[:name]} at path: #{job_path}")
+      raise Puppet::Error.new("Unable to start service: #{resource[:name]} at path: #{job_path}", $!)
     end
     # As load -w clears the Disabled flag, we need to add it in after
     self.disable if did_enable_job and resource[:enable] == :false
@@ -267,7 +275,7 @@ Puppet::Type.type(:service).provide :launchd, :parent => :base do
     begin
       execute(cmds)
     rescue Puppet::ExecutionFailure
-      raise Puppet::Error.new("Unable to stop service: #{resource[:name]} at path: #{job_path}")
+      raise Puppet::Error.new("Unable to stop service: #{resource[:name]} at path: #{job_path}", $!)
     end
     # As unload -w sets the Disabled flag, we need to add it in after
     self.enable if did_disable_job and resource[:enable] == :true

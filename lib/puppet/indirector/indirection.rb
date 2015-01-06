@@ -1,4 +1,5 @@
 require 'puppet/util/docs'
+require 'puppet/util/profiler'
 require 'puppet/util/methodhelper'
 require 'puppet/indirector/envelope'
 require 'puppet/indirector/request'
@@ -84,10 +85,11 @@ class Puppet::Indirector::Indirection
   def doc
     text = ""
 
-    text += scrub(@doc) + "\n\n" if @doc
+    text << scrub(@doc) << "\n\n" if @doc
 
-    if s = terminus_setting
-      text += "* **Terminus Setting**: #{terminus_setting}"
+    text << "* **Indirected Class**: `#{@indirected_class}`\n";
+    if terminus_setting
+      text << "* **Terminus Setting**: #{terminus_setting}\n"
     end
 
     text
@@ -104,6 +106,7 @@ class Puppet::Indirector::Indirection
     raise(ArgumentError, "Indirection #{@name} is already defined") if @@indirections.find { |i| i.name == @name }
     @@indirections << self
 
+    @indirected_class = options.delete(:indirected_class)
     if mod = options[:extend]
       extend(mod)
       options.delete(:extend)
@@ -177,28 +180,42 @@ class Puppet::Indirector::Indirection
     cache.save(request(:save, nil, instance, options))
   end
 
+  def allow_remote_requests?
+    terminus.allow_remote_requests?
+  end
+
   # Search for an instance in the appropriate terminus, caching the
   # results if caching is configured..
   def find(key, options={})
     request = request(:find, key, nil, options)
     terminus = prepare(request)
 
-    if result = find_in_cache(request)
-      return result
-    end
+    result = find_in_cache(request)
+    if not result.nil?
+      result
+    elsif request.ignore_terminus?
+      nil
+    else
+      # Otherwise, return the result from the terminus, caching if
+      # appropriate.
+      result = terminus.find(request)
+      if not result.nil?
+        result.expiration ||= self.expiration if result.respond_to?(:expiration)
+        if cache?
+          Puppet.info "Caching #{self.name} for #{request.key}"
+          cache.save request(:save, key, result, options)
+        end
 
-    # Otherwise, return the result from the terminus, caching if appropriate.
-    if ! request.ignore_terminus? and result = terminus.find(request)
-      result.expiration ||= self.expiration if result.respond_to?(:expiration)
-      if cache? and request.use_cache?
-        Puppet.info "Caching #{self.name} for #{request.key}"
-        cache.save request(:save, key, result, options)
+        filtered = result
+        if terminus.respond_to?(:filter)
+          Puppet::Util::Profiler.profile("Filtered result for #{self.name} #{request.key}", [:indirector, :filter, self.name, request.key]) do
+            filtered = terminus.filter(result)
+          end
+        end
+
+        filtered
       end
-
-      return terminus.respond_to?(:filter) ? terminus.filter(result) : result
     end
-
-    nil
   end
 
   # Search for an instance in the appropriate terminus, and return a
@@ -234,7 +251,7 @@ class Puppet::Indirector::Indirection
 
     result = terminus.destroy(request)
 
-    if cache? and cached = cache.find(request(:find, key, nil, options))
+    if cache? and cache.find(request(:find, key, nil, options))
       # Reuse the existing request, since it's equivalent.
       cache.destroy(request)
     end

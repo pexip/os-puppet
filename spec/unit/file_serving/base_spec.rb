@@ -42,12 +42,12 @@ describe Puppet::FileServing::Base do
   end
 
   it "should allow specification of a path" do
-    FileTest.stubs(:exists?).returns(true)
+    Puppet::FileSystem.stubs(:exist?).returns(true)
     Puppet::FileServing::Base.new(path, :path => file).path.should == file
   end
 
   it "should allow specification of a relative path" do
-    FileTest.stubs(:exists?).returns(true)
+    Puppet::FileSystem.stubs(:exist?).returns(true)
     Puppet::FileServing::Base.new(path, :relative_path => "my/file").relative_path.should == "my/file"
   end
 
@@ -56,19 +56,19 @@ describe Puppet::FileServing::Base do
   end
 
   it "should correctly indicate if the file is present" do
-    File.expects(:lstat).with(file).returns(mock("stat"))
+    Puppet::FileSystem.expects(:lstat).with(file).returns stub('stat')
     Puppet::FileServing::Base.new(file).exist?.should be_true
   end
 
   it "should correctly indicate if the file is absent" do
-    File.expects(:lstat).with(file).raises RuntimeError
+    Puppet::FileSystem.expects(:lstat).with(file).raises RuntimeError
     Puppet::FileServing::Base.new(file).exist?.should be_false
   end
 
   describe "when setting the relative path" do
     it "should require that the relative path be unqualified" do
       @file = Puppet::FileServing::Base.new(path)
-      FileTest.stubs(:exists?).returns(true)
+      Puppet::FileSystem.stubs(:exist?).returns(true)
       proc { @file.relative_path = File.expand_path("/qualified/file") }.should raise_error(ArgumentError)
     end
   end
@@ -102,27 +102,46 @@ describe Puppet::FileServing::Base do
     end
   end
 
+  describe "when handling a UNC file path on Windows" do
+    let(:path) { '//server/share/filename' }
+    let(:file) { Puppet::FileServing::Base.new(path) }
+
+    it "should preserve double slashes at the beginning of the path" do
+      Puppet.features.stubs(:microsoft_windows?).returns(true)
+      file.full_path.should == path
+    end
+
+    it "should strip double slashes not at the beginning of the path" do
+      Puppet.features.stubs(:microsoft_windows?).returns(true)
+      file = Puppet::FileServing::Base.new('//server//share//filename')
+      file.full_path.should == path
+    end
+  end
+
+
   describe "when stat'ing files" do
     let(:path) { File.expand_path('/this/file') }
     let(:file) { Puppet::FileServing::Base.new(path) }
+    let(:stat) { stub('stat', :ftype => 'file' ) }
+    let(:stubbed_file) { stub(path, :stat => stat, :lstat => stat)}
 
     it "should stat the file's full path" do
-      File.expects(:lstat).with(path).returns stub("stat", :ftype => "file")
+      Puppet::FileSystem.expects(:lstat).with(path).returns stat
       file.stat
     end
 
     it "should fail if the file does not exist" do
-      File.expects(:lstat).with(path).raises(Errno::ENOENT)
+      Puppet::FileSystem.expects(:lstat).with(path).raises(Errno::ENOENT)
       proc { file.stat }.should raise_error(Errno::ENOENT)
     end
 
     it "should use :lstat if :links is set to :manage" do
-      File.expects(:lstat).with(path).returns stub("stat", :ftype => "file")
+      Puppet::FileSystem.expects(:lstat).with(path).returns stubbed_file
       file.stat
     end
 
     it "should use :stat if :links is set to :follow" do
-      File.expects(:stat).with(path).returns stub("stat", :ftype => "file")
+      Puppet::FileSystem.expects(:stat).with(path).returns stubbed_file
       file.links = :follow
       file.stat
     end

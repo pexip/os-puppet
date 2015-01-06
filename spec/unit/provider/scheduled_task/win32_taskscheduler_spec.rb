@@ -1,7 +1,7 @@
 #! /usr/bin/env ruby
 require 'spec_helper'
 
-require 'win32/taskscheduler' if Puppet.features.microsoft_windows?
+require 'puppet/util/windows/taskscheduler' if Puppet.features.microsoft_windows?
 
 shared_examples_for "a trigger that handles start_date and start_time" do
   let(:trigger) do
@@ -142,14 +142,14 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
             'type'         => { 'days_interval' => 2 },
           })
 
-          resource.provider.trigger.should == {
+          resource.provider.trigger.should == [{
             'start_date' => '2011-9-12',
             'start_time' => '13:20',
             'schedule'   => 'daily',
             'every'      => '2',
             'enabled'    => true,
             'index'      => 0,
-          }
+          }]
         end
 
         it 'should handle a single weekly trigger' do
@@ -171,7 +171,7 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
             }
           })
 
-          resource.provider.trigger.should == {
+          resource.provider.trigger.should == [{
             'start_date' => '2011-9-12',
             'start_time' => '13:20',
             'schedule'   => 'weekly',
@@ -179,7 +179,7 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
             'on'         => ['sun', 'mon', 'wed', 'fri'],
             'enabled'    => true,
             'index'      => 0,
-          }
+          }]
         end
 
         it 'should handle a single monthly date-based trigger' do
@@ -204,7 +204,7 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
             }
           })
 
-          resource.provider.trigger.should == {
+          resource.provider.trigger.should == [{
             'start_date' => '2011-9-12',
             'start_time' => '13:20',
             'schedule'   => 'monthly',
@@ -212,7 +212,7 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
             'on'         => [1, 3, 5, 15, 'last'],
             'enabled'    => true,
             'index'      => 0,
-          }
+          }]
         end
 
         it 'should handle a single monthly day-of-week-based trigger' do
@@ -240,7 +240,7 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
             }
           })
 
-          resource.provider.trigger.should == {
+          resource.provider.trigger.should == [{
             'start_date'       => '2011-9-12',
             'start_time'       => '13:20',
             'schedule'         => 'monthly',
@@ -249,7 +249,7 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
             'day_of_week'      => ['sun', 'mon', 'wed', 'fri'],
             'enabled'          => true,
             'index'            => 0,
-          }
+          }]
         end
 
         it 'should handle a single one-time trigger' do
@@ -263,13 +263,13 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
             'flags'        => 0,
           })
 
-          resource.provider.trigger.should == {
+          resource.provider.trigger.should == [{
             'start_date' => '2011-9-12',
             'start_time' => '13:20',
             'schedule'   => 'once',
             'enabled'    => true,
             'index'      => 0,
-          }
+          }]
         end
       end
 
@@ -536,18 +536,18 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
         'index'      => 0,
       }
 
-      resource.provider.trigger.should == mock_task_trigger
-      resource.provider.trigger.should == mock_task_trigger
+      resource.provider.trigger.should == [mock_task_trigger]
+      resource.provider.trigger.should == [mock_task_trigger]
 
       resource.provider.clear_task
 
-      resource.provider.trigger.should == {
+      resource.provider.trigger.should == [{
         'start_date' => '2012-11-14',
         'start_time' => '15:22',
         'schedule'   => 'once',
         'enabled'    => true,
         'index'      => 0,
-      }
+      }]
     end
   end
 
@@ -569,27 +569,27 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
     let(:resource) { described_class.new(:name => 'foobar', :command => 'C:\Windows\System32\notepad.exe') }
 
     it 'should consider the user as in sync if the name matches' do
-      Puppet::Util::Windows::Security.expects(:name_to_sid).with('joe').twice.returns('SID A')
+      Puppet::Util::Windows::SID.expects(:name_to_sid).with('joe').twice.returns('SID A')
 
       resource.should be_user_insync('joe', ['joe'])
     end
 
     it 'should consider the user as in sync if the current user is fully qualified' do
-      Puppet::Util::Windows::Security.expects(:name_to_sid).with('joe').returns('SID A')
-      Puppet::Util::Windows::Security.expects(:name_to_sid).with('MACHINE\joe').returns('SID A')
+      Puppet::Util::Windows::SID.expects(:name_to_sid).with('joe').returns('SID A')
+      Puppet::Util::Windows::SID.expects(:name_to_sid).with('MACHINE\joe').returns('SID A')
 
       resource.should be_user_insync('MACHINE\joe', ['joe'])
     end
 
     it 'should consider a current user of the empty string to be the same as the system user' do
-      Puppet::Util::Windows::Security.expects(:name_to_sid).with('system').twice.returns('SYSTEM SID')
+      Puppet::Util::Windows::SID.expects(:name_to_sid).with('system').twice.returns('SYSTEM SID')
 
       resource.should be_user_insync('', ['system'])
     end
 
     it 'should consider different users as being different' do
-      Puppet::Util::Windows::Security.expects(:name_to_sid).with('joe').returns('SID A')
-      Puppet::Util::Windows::Security.expects(:name_to_sid).with('bob').returns('SID B')
+      Puppet::Util::Windows::SID.expects(:name_to_sid).with('joe').returns('SID A')
+      Puppet::Util::Windows::SID.expects(:name_to_sid).with('bob').returns('SID B')
 
       resource.should_not be_user_insync('joe', ['bob'])
     end
@@ -635,6 +635,30 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
   describe '#triggers_same?' do
     let(:provider) { described_class.new(:name => 'foobar', :command => 'C:\Windows\System32\notepad.exe') }
 
+    it "should not mutate triggers" do
+      current = {'schedule' => 'daily', 'start_date' => '2011-09-12', 'start_time' => '15:30', 'every' => 3}
+      current.freeze
+
+      desired = {'schedule' => 'daily', 'start_date' => '2011-09-12', 'start_time' => '15:30'}
+      desired.freeze
+
+      expect(provider).to be_triggers_same(current, desired)
+    end
+
+    it "ignores 'index' in current trigger" do
+      current = {'index' => 0, 'schedule' => 'daily', 'start_date' => '2011-09-12', 'start_time' => '15:30', 'every' => 3}
+      desired = {'schedule' => 'daily', 'start_date' => '2011-09-12', 'start_time' => '15:30', 'every' => 3}
+
+      expect(provider).to be_triggers_same(current, desired)
+    end
+
+    it "ignores 'enabled' in current triggger" do
+      current = {'enabled' => true, 'schedule' => 'daily', 'start_date' => '2011-09-12', 'start_time' => '15:30', 'every' => 3}
+      desired = {'schedule' => 'daily', 'start_date' => '2011-09-12', 'start_time' => '15:30', 'every' => 3}
+
+      expect(provider).to be_triggers_same(current, desired)
+    end
+
     it "should not consider a disabled 'current' trigger to be the same" do
       current = {'schedule' => 'once', 'enabled' => false}
       desired = {'schedule' => 'once'}
@@ -647,6 +671,15 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
       desired = {'schedule' => 'weekly'}
 
       provider.should_not be_triggers_same(current, desired)
+    end
+
+    describe 'start_date' do
+      it "considers triggers to be equal when start_date is not specified in the 'desired' trigger" do
+        current = {'schedule' => 'daily', 'start_date' => '2011-09-12', 'start_time' => '15:30', 'every' => 3}
+        desired = {'schedule' => 'daily', 'start_time' => '15:30', 'every' => 3}
+
+        provider.should be_triggers_same(current, desired)
+      end
     end
 
     describe 'comparing daily triggers' do
@@ -1469,7 +1502,7 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
       end
 
       it 'should use nil for user and password when setting the user to the SYSTEM account' do
-        Puppet::Util::Windows::Security.stubs(:name_to_sid).with('system').returns('SYSTEM SID')
+        Puppet::Util::Windows::SID.stubs(:name_to_sid).with('system').returns('SYSTEM SID')
 
         resource = Puppet::Type.type(:scheduled_task).new(
           :name    => 'Test Task',
@@ -1483,7 +1516,7 @@ describe Puppet::Type.type(:scheduled_task).provider(:win32_taskscheduler), :if 
       end
 
       it 'should use the specified user and password when setting the user to anything other than SYSTEM' do
-        Puppet::Util::Windows::Security.stubs(:name_to_sid).with('my_user_name').returns('SID A')
+        Puppet::Util::Windows::SID.stubs(:name_to_sid).with('my_user_name').returns('SID A')
 
         resource = Puppet::Type.type(:scheduled_task).new(
           :name     => 'Test Task',

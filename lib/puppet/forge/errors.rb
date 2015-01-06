@@ -1,4 +1,6 @@
+require 'json'
 require 'puppet/error'
+require 'puppet/forge'
 
 # Puppet::Forge specific exceptions
 module Puppet::Forge::Errors
@@ -30,7 +32,7 @@ module Puppet::Forge::Errors
     #
     # @return [String] the multiline version of the error message
     def multiline
-      message = <<-EOS.chomp
+      <<-EOS.chomp
 Could not connect via HTTPS to #{@uri}
   Unable to verify the SSL certificate
     The certificate may not be signed by a valid CA
@@ -57,12 +59,53 @@ Could not connect via HTTPS to #{@uri}
     #
     # @return [String] the multiline version of the error message
     def multiline
-      message = <<-EOS.chomp
+      <<-EOS.chomp
 Could not connect to #{@uri}
   There was a network communications problem
     The error we caught said '#{@detail}'
     Check your network connection and try again
       EOS
+    end
+  end
+
+  # This exception is raised when there is a bad HTTP response from the forge
+  # and optionally a message in the response.
+  class ResponseError < ForgeError
+    # @option options [String] :uri The URI that failed
+    # @option options [String] :input The user's input (e.g. module name)
+    # @option options [String] :message Error from the API response (optional)
+    # @option options [Net::HTTPResponse] :response The original HTTP response
+    def initialize(options)
+      @uri     = options[:uri]
+      @message = options[:message]
+      response = options[:response]
+      @response = "#{response.code} #{response.message.strip}"
+
+      begin
+        body = JSON.parse(response.body)
+        if body['message']
+          @message ||= body['message'].strip
+        end
+      rescue JSON::ParserError
+      end
+
+      message = "Request to Puppet Forge failed. Detail: "
+      message << @message << " / " if @message
+      message << @response << "."
+      super(message, original)
+    end
+
+    # Return a multiline version of the error message
+    #
+    # @return [String] the multiline version of the error message
+    def multiline
+      message = <<-EOS.chomp
+Request to Puppet Forge failed.
+  The server being queried was #{@uri}
+  The HTTP response we received was '#{@response}'
+      EOS
+      message << "\n  The message we received said '#{@message}'" if @message
+      message
     end
   end
 

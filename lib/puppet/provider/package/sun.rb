@@ -4,7 +4,11 @@ require 'puppet/provider/package'
 
 Puppet::Type.type(:package).provide :sun, :parent => Puppet::Provider::Package do
   desc "Sun's packaging system.  Requires that you specify the source for
-    the packages you're managing."
+    the packages you're managing.
+
+    This provider supports the `install_options` attribute, which allows command-line flags to be passed to pkgadd.
+    These options should be specified as a string (e.g. '--flag'), a hash (e.g. {'--flag' => 'value'}),
+    or an array where each element is either a string or a hash."
 
   commands :pkginfo => "/usr/bin/pkginfo",
     :pkgadd => "/usr/sbin/pkgadd",
@@ -15,7 +19,7 @@ Puppet::Type.type(:package).provide :sun, :parent => Puppet::Provider::Package d
 
   has_feature :install_options
 
-  Namemap = {
+  self::Namemap = {
     "PKGINST"  => :name,
     "CATEGORY" => :category,
     "ARCH"     => :platform,
@@ -26,8 +30,8 @@ Puppet::Type.type(:package).provide :sun, :parent => Puppet::Provider::Package d
   }
 
   def self.namemap(hash)
-    Namemap.keys.inject({}) do |hsh,k|
-      hsh.merge(Namemap[k] => hash[k])
+    self::Namemap.keys.inject({}) do |hsh,k|
+      hsh.merge(self::Namemap[k] => hash[k])
     end
   end
 
@@ -49,7 +53,7 @@ Puppet::Type.type(:package).provide :sun, :parent => Puppet::Provider::Package d
   end
 
   def self.instances
-    parse_pkginfo(execute([command(:pkginfo), '-l'])).collect do |p|
+    parse_pkginfo(pkginfo('-l')).collect do |p|
       hash = namemap(p)
       hash[:provider] = :sun
       new(hash)
@@ -58,17 +62,24 @@ Puppet::Type.type(:package).provide :sun, :parent => Puppet::Provider::Package d
 
   # Get info on a package, optionally specifying a device.
   def info2hash(device = nil)
-    cmd = [command(:pkginfo), '-l']
-    cmd << '-d' << device if device
-    cmd << @resource[:name]
-    pkgs = self.class.parse_pkginfo(execute(cmd, :failonfail => false, :combine => false))
-    errmsg = case pkgs.size
-             when 0; 'No message'
-             when 1; pkgs[0]['ERROR']
-             end
-    return self.class.namemap(pkgs[0]) if errmsg.nil?
-    return {:ensure => :absent} if errmsg =~ /information for "#{Regexp.escape(@resource[:name])}"/
-    raise Puppet::Error, "Unable to get information about package #{@resource[:name]} because of: #{errmsg}"
+    args = ['-l']
+    args << '-d' << device if device
+    args << @resource[:name]
+    begin
+      pkgs = self.class.parse_pkginfo(pkginfo(*args))
+      errmsg = case pkgs.size
+        when 0
+          'No message'
+        when 1
+           pkgs[0]['ERROR']
+      end
+      return self.class.namemap(pkgs[0]) if errmsg.nil?
+      # according to commit 41356a7 some errors do not raise an exception
+      # so eventhough pkginfo passed, we have to check the actual output
+      raise Puppet::Error, "Unable to get information about package #{@resource[:name]} because of: #{errmsg}"
+    rescue Puppet::ExecutionFailure
+      return {:ensure => :absent}
+    end
   end
 
   # Retrieve the version from the current package file.

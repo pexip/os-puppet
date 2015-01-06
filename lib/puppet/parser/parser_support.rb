@@ -38,6 +38,11 @@ class Puppet::Parser::Parser
     ast AST::ASTArray, :children => [arg]
   end
 
+  # Create an AST block containing a single element
+  def block(arg)
+    ast AST::BlockExpression, :children => [arg]
+  end
+
   # Create an AST object, and automatically add the file and line information if
   # available.
   def ast(klass, hash = {})
@@ -64,7 +69,7 @@ class Puppet::Parser::Parser
 
   # Raise a Parse error.
   def error(message, options = {})
-    if brace = @lexer.expected
+    if @lexer.expected
       message += "; expected '%s'"
     end
     except = Puppet::ParseError.new(message)
@@ -77,12 +82,12 @@ class Puppet::Parser::Parser
   def_delegators :@lexer, :file, :string=
 
   def file=(file)
-    unless FileTest.exist?(file)
+    unless Puppet::FileSystem.exist?(file)
       unless file =~ /\.pp$/
         file = file + ".pp"
       end
     end
-    raise Puppet::AlreadyImportedError, "Import loop detected" if known_resource_types.watching_file?(file)
+    raise Puppet::AlreadyImportedError, "Import loop detected for #{file}" if known_resource_types.watching_file?(file)
 
     watch_file(file)
     @lexer.file = file
@@ -93,12 +98,30 @@ class Puppet::Parser::Parser
   def_delegators :known_resource_types, :watch_file, :version
 
   def import(file)
-    known_resource_types.loader.import(file, @lexer.file)
+    deprecation_location_text =
+    if @lexer.file && @lexer.line
+      " at #{@lexer.file}:#{@lexer.line}"
+    elsif @lexer.file
+      " in file #{@lexer.file}"
+    elsif @lexer.line
+      " at #{@lexer.line}"
+    end
+
+    Puppet.deprecation_warning("The use of 'import' is deprecated#{deprecation_location_text}. See http://links.puppetlabs.com/puppet-import-deprecation")
+    if @lexer.file
+      # use a path relative to the file doing the importing
+      dir = File.dirname(@lexer.file)
+    else
+      # otherwise assume that everything needs to be from where the user is
+      # executing this command. Normally, this would be in a "puppet apply -e"
+      dir = Dir.pwd
+    end
+
+    known_resource_types.loader.import(file, dir)
   end
 
   def initialize(env)
-    # The environment is needed to know how to find the resource type collection.
-    @environment = env.is_a?(String) ? Puppet::Node::Environment.new(env) : env
+    @environment = env
     initvars
   end
 
@@ -146,9 +169,10 @@ class Puppet::Parser::Parser
       rescue Puppet::ParseError => except
         except.line ||= @lexer.line
         except.file ||= @lexer.file
+        except.pos ||= @lexer.pos
         raise except
       rescue => except
-        raise Puppet::ParseError.new(except.message, @lexer.file, @lexer.line, except)
+        raise Puppet::ParseError.new(except.message, @lexer.file, @lexer.line, nil, except)
       end
     end
     # Store the results as the top-level class.
@@ -166,6 +190,6 @@ class Puppet::Parser::Parser
     main_object.instance_eval(File.read(self.file))
 
     # Then extract any types that were created.
-    Puppet::Parser::AST::ASTArray.new :children => main_object.instance_eval { @__created_ast_objects__ }
+    Puppet::Parser::AST::BlockExpression.new :children => main_object.instance_eval { @__created_ast_objects__ }
   end
 end

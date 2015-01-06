@@ -1,3 +1,5 @@
+require 'puppet/util/methodhelper'
+
 module Puppet
   class ConstantAlreadyDefined < Error; end
   class SubclassAlreadyDefined < Error; end
@@ -34,9 +36,9 @@ module Puppet::Util::ClassGen
     genthing(name, Class, options, block)
   end
 
-  # Creates a new module.  
+  # Creates a new module.
   # @param name [String] the name of the generated module
-  # @param optinos [Hash] hash with options
+  # @param options [Hash] hash with options
   # @option options [Array<Class>] :array if specified, the generated class is appended to this array
   # @option options [Hash<{String => Object}>] :attributes a hash that is applied to the generated class
   #   by calling setter methods corresponding to this hash's keys/value pairs. This is done before the given
@@ -67,7 +69,7 @@ module Puppet::Util::ClassGen
     options = symbolize_options(options)
     const = genconst_string(name, options)
     retval = false
-    if const_defined?(const)
+    if is_constant_defined?(const)
       remove_const(const)
       retval = true
     end
@@ -148,10 +150,10 @@ module Puppet::Util::ClassGen
   # @api private
   #
   def is_constant_defined?(const)
-    if ::RUBY_VERSION =~ /1.9/
-      const_defined?(const, false)
-    else
+    if ::RUBY_VERSION =~ /^1\.8/
       const_defined?(const)
+    else
+      const_defined?(const, false)
     end
   end
 

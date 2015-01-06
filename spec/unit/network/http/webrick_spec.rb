@@ -22,6 +22,10 @@ describe Puppet::Network::HTTP::WEBrick do
     s
   end
 
+  let(:mock_ssl_context) do
+    stub('ssl_context', :ciphers= => nil)
+  end
+
   let(:mock_webrick) do
     stub('webrick',
          :[] => {},
@@ -29,7 +33,8 @@ describe Puppet::Network::HTTP::WEBrick do
          :status => :Running,
          :mount => nil,
          :start => nil,
-         :shutdown => nil)
+         :shutdown => nil,
+         :ssl_context => mock_ssl_context)
   end
 
   before :each do
@@ -43,9 +48,18 @@ describe Puppet::Network::HTTP::WEBrick do
     end
 
     it "should tell webrick to listen on the specified address and port" do
-      WEBrick::HTTPServer.expects(:new).with {|args|
-        args[:Port] == 31337 and args[:BindAddress] == "127.0.0.1"
-      }.returns(mock_webrick)
+      WEBrick::HTTPServer.expects(:new).with(
+        has_entries(:Port => 31337, :BindAddress => "127.0.0.1")
+      ).returns(mock_webrick)
+      server.listen(address, port)
+    end
+
+    it "should not perform reverse lookups" do
+      WEBrick::HTTPServer.expects(:new).with(
+        has_entry(:DoNotReverseLookup => true)
+      ).returns(mock_webrick)
+      BasicSocket.expects(:do_not_reverse_lookup=).with(true)
+
       server.listen(address, port)
     end
 
@@ -118,7 +132,7 @@ describe Puppet::Network::HTTP::WEBrick do
       server.setup_logger
     end
 
-    it "should use the masterlog if the run_mode is master" do
+    it "should use the masterhttplog if the run_mode is master" do
       Puppet.run_mode.stubs(:master?).returns(true)
       log = make_absolute("/master/log")
       Puppet[:masterhttplog] = log
@@ -242,7 +256,15 @@ describe Puppet::Network::HTTP::WEBrick do
     end
 
     it "should reject SSLv2" do
-      server.setup_ssl[:SSLOptions].should == OpenSSL::SSL::OP_NO_SSLv2
+      options = server.setup_ssl[:SSLOptions]
+
+      expect(options & OpenSSL::SSL::OP_NO_SSLv2).to eq(OpenSSL::SSL::OP_NO_SSLv2)
+    end
+
+    it "should reject SSLv3" do
+      options = server.setup_ssl[:SSLOptions]
+
+      expect(options & OpenSSL::SSL::OP_NO_SSLv3).to eq(OpenSSL::SSL::OP_NO_SSLv3)
     end
 
     it "should configure the verification method as 'OpenSSL::SSL::VERIFY_PEER'" do
@@ -257,6 +279,12 @@ describe Puppet::Network::HTTP::WEBrick do
 
     it "should set the certificate name to 'nil'" do
       server.setup_ssl[:SSLCertName].should be_nil
+    end
+
+    it "specifies the allowable ciphers" do
+      mock_ssl_context.expects(:ciphers=).with(server.class::CIPHERS)
+
+      server.create_server('localhost', '8888')
     end
   end
 end

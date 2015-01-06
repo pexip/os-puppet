@@ -90,9 +90,6 @@ class Puppet::Provider::NameService::DirectoryService < Puppet::Provider::NameSe
   def self.get_macosx_version_major
     return @macosx_version_major if defined?(@macosx_version_major)
     begin
-      # Make sure we've loaded all of the facts
-      Facter.loadfacts
-
       product_version_major = Facter.value(:macosx_productversion_major)
 
       fail("#{product_version_major} is not supported by the directoryservice provider") if %w{10.0 10.1 10.2 10.3 10.4}.include?(product_version_major)
@@ -108,7 +105,7 @@ class Puppet::Provider::NameService::DirectoryService < Puppet::Provider::NameSe
     # JJM: List all objects of this Puppet::Type already present on the system.
     begin
       dscl_output = execute(get_exec_preamble("-list"))
-    rescue Puppet::ExecutionFailure => detail
+    rescue Puppet::ExecutionFailure
       fail("Could not get #{@resource_type.name} list from DirectoryService")
     end
     dscl_output.split("\n")
@@ -166,7 +163,7 @@ class Puppet::Provider::NameService::DirectoryService < Puppet::Provider::NameSe
     dscl_vector = get_exec_preamble("-read", resource_name)
     begin
       dscl_output = execute(dscl_vector)
-    rescue Puppet::ExecutionFailure => detail
+    rescue Puppet::ExecutionFailure
       fail("Could not get report.  command execution failed.")
     end
 
@@ -178,7 +175,9 @@ class Puppet::Provider::NameService::DirectoryService < Puppet::Provider::NameSe
   end
 
   def self.fail_if_wrong_version
-    fail("Puppet does not support OS X versions < 10.5") unless self.get_macosx_version_major >= "10.5"
+    if (Puppet::Util::Package.versioncmp(self.get_macosx_version_major, '10.5') == -1)
+      fail("Puppet does not support OS X versions < 10.5")
+    end
   end
 
   def self.get_exec_preamble(ds_action, resource_name = nil)
@@ -237,7 +236,7 @@ class Puppet::Provider::NameService::DirectoryService < Puppet::Provider::NameSe
       dscl_vector = self.get_exec_preamble("-merge", resource_name)
       dscl_vector << "AuthenticationAuthority" << ";ShadowHash;"
       begin
-        dscl_output = execute(dscl_vector)
+        execute(dscl_vector)
       rescue Puppet::ExecutionFailure => detail
         fail("Could not set AuthenticationAuthority.")
       end
@@ -251,7 +250,7 @@ class Puppet::Provider::NameService::DirectoryService < Puppet::Provider::NameSe
              Please check your password and try again.")
       end
 
-      if File.exists?("#{users_plist_dir}/#{resource_name}.plist")
+      if Puppet::FileSystem.exist?("#{users_plist_dir}/#{resource_name}.plist")
         # If a plist already exists in /var/db/dslocal/nodes/Default/users, then
         # we will need to extract the binary plist from the 'ShadowHashData'
         # key, log the new password into the resultant plist's 'SALTED-SHA512'
@@ -296,7 +295,7 @@ class Puppet::Provider::NameService::DirectoryService < Puppet::Provider::NameSe
     if (Puppet::Util::Package.versioncmp(get_macosx_version_major, '10.7') == -1)
       password_hash = nil
       password_hash_file = "#{password_hash_dir}/#{guid}"
-      if File.exists?(password_hash_file) and File.file?(password_hash_file)
+      if Puppet::FileSystem.exist?(password_hash_file) and File.file?(password_hash_file)
         fail("Could not read password hash file at #{password_hash_file}") if not File.readable?(password_hash_file)
         f = File.new(password_hash_file)
         password_hash = f.read
@@ -304,7 +303,7 @@ class Puppet::Provider::NameService::DirectoryService < Puppet::Provider::NameSe
       end
       password_hash
     else
-      if File.exists?("#{users_plist_dir}/#{username}.plist")
+      if Puppet::FileSystem.exist?("#{users_plist_dir}/#{username}.plist")
         # If a plist exists in /var/db/dslocal/nodes/Default/users, we will
         # extract the binary plist from the 'ShadowHashData' key, decode the
         # salted-SHA512 password hash, and then return it.
@@ -332,7 +331,7 @@ class Puppet::Provider::NameService::DirectoryService < Puppet::Provider::NameSe
   def self.convert_xml_to_binary(plist_data)
     Puppet.debug('Converting XML plist to binary')
     Puppet.debug('Executing: \'plutil -convert binary1 -o - -\'')
-    IO.popen('plutil -convert binary1 -o - -', mode='r+') do |io|
+    IO.popen('plutil -convert binary1 -o - -', 'r+') do |io|
       io.write plist_data.to_plist
       io.close_write
       @converted_plist = io.read
@@ -345,7 +344,7 @@ class Puppet::Provider::NameService::DirectoryService < Puppet::Provider::NameSe
   def self.convert_binary_to_xml(plist_data)
     Puppet.debug('Converting binary plist to XML')
     Puppet.debug('Executing: \'plutil -convert xml1 -o - -\'')
-    IO.popen('plutil -convert xml1 -o - -', mode='r+') do |io|
+    IO.popen('plutil -convert xml1 -o - -', 'r+') do |io|
       io.write plist_data
       io.close_write
       @converted_plist = io.read

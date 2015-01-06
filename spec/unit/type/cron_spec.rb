@@ -3,10 +3,18 @@
 require 'spec_helper'
 
 describe Puppet::Type.type(:cron), :unless => Puppet.features.microsoft_windows? do
-  before do
+  let(:simple_provider) do
     @provider_class = described_class.provide(:simple) { mk_resource_methods }
     @provider_class.stubs(:suitable?).returns true
+    @provider_class
+  end
+
+  before :each do
     described_class.stubs(:defaultprovider).returns @provider_class
+  end
+
+  after :each do
+    described_class.unprovide(:simple)
   end
 
   it "should have :name be its namevar" do
@@ -47,6 +55,15 @@ describe Puppet::Type.type(:cron), :unless => Puppet.features.microsoft_windows?
 
       it "should not support other values" do
         expect { described_class.new(:name => 'foo', :ensure => :foo) }.to raise_error(Puppet::Error, /Invalid value/)
+      end
+    end
+
+    describe "command" do
+      it "should discard leading spaces" do
+        described_class.new(:name => 'foo', :command => " /bin/true")[:command].should_not match Regexp.new(" ")
+      end
+      it "should discard trailing spaces" do
+        described_class.new(:name => 'foo', :command => "/bin/true ")[:command].should_not match Regexp.new(" ")
       end
     end
 
@@ -432,6 +449,40 @@ describe Puppet::Type.type(:cron), :unless => Puppet.features.microsoft_windows?
       end
     end
 
+    describe "special" do
+      %w(reboot yearly annually monthly weekly daily midnight hourly).each do |value|
+        it "should support the value '#{value}'" do
+          expect { described_class.new(:name => 'foo', :special => value ) }.to_not raise_error
+        end
+      end
+
+      context "when combined with numeric schedule fields" do
+        context "which are 'absent'" do
+          [ %w(reboot yearly annually monthly weekly daily midnight hourly), :absent ].flatten.each { |value|
+            it "should accept the value '#{value}' for special" do
+              expect {
+                described_class.new(:name => 'foo', :minute => :absent, :special => value )
+              }.to_not raise_error
+            end
+          }
+        end
+        context "which are not absent" do
+          %w(reboot yearly annually monthly weekly daily midnight hourly).each { |value|
+            it "should not accept the value '#{value}' for special" do
+              expect {
+                described_class.new(:name => 'foo', :minute => "1", :special => value )
+              }.to raise_error(Puppet::Error, /cannot specify both a special schedule and a value/)
+            end
+          }
+          it "should accept the 'absent' value for special" do
+            expect {
+              described_class.new(:name => 'foo', :minute => "1", :special => :absent )
+            }.to_not raise_error
+          end
+        end
+      end
+    end
+
     describe "environment" do
       it "it should accept an :environment that looks like a path" do
         expect do
@@ -448,13 +499,13 @@ describe Puppet::Type.type(:cron), :unless => Puppet.features.microsoft_windows?
       it "should accept empty environment variables that do not contain '='" do
         expect do
           described_class.new(:name => 'foo',:environment => 'MAILTO=')
-        end.to_not raise_error(Puppet::Error)
+        end.to_not raise_error
       end
 
       it "should accept 'absent'" do
         expect do
           described_class.new(:name => 'foo',:environment => 'absent')
-        end.to_not raise_error(Puppet::Error)
+        end.to_not raise_error
       end
 
     end
@@ -477,11 +528,6 @@ describe Puppet::Type.type(:cron), :unless => Puppet.features.microsoft_windows?
       req[0].target.must == @resource
       req[0].source.must == @user_alice
     end
-  end
-
-  it "should require a command when adding an entry" do
-    entry = described_class.new(:name => "test_entry", :ensure => :present)
-    expect { entry.value(:command) }.to raise_error(Puppet::Error, /No command/)
   end
 
   it "should not require a command when removing an entry" do

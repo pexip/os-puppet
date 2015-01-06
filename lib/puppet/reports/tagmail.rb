@@ -6,9 +6,9 @@ require 'time'
 
 Puppet::Reports.register_report(:tagmail) do
   desc "This report sends specific log messages to specific email addresses
-    based on the tags in the log messages.  
+    based on the tags in the log messages.
 
-    See the [documentation on tags](http://projects.puppetlabs.com/projects/puppet/wiki/Using_Tags) for more information.
+    See the [documentation on tags](http://docs.puppetlabs.com/puppet/latest/reference/lang_tags.html) for more information.
 
     To use this report, you must create a `tagmail.conf` file in the location
     specified by the `tagmap` setting.  This is a simple file that maps tags to
@@ -108,7 +108,7 @@ Puppet::Reports.register_report(:tagmail) do
 
   # Process the report.  This just calls the other associated messages.
   def process
-    unless FileTest.exists?(Puppet[:tagmap])
+    unless Puppet::FileSystem.exist?(Puppet[:tagmap])
       Puppet.notice "Cannot send tagmail report; no tagmap file #{Puppet[:tagmap]}"
       return
     end
@@ -133,7 +133,7 @@ Puppet::Reports.register_report(:tagmail) do
     pid = Puppet::Util.safe_posix_fork do
       if Puppet[:smtpserver] != "none"
         begin
-          Net::SMTP.start(Puppet[:smtpserver]) do |smtp|
+          Net::SMTP.start(Puppet[:smtpserver], Puppet[:smtpport], Puppet[:smtphelo]) do |smtp|
             reports.each do |emails, messages|
               smtp.open_message_stream(Puppet[:reportfrom], *emails) do |p|
                 p.puts "From: #{Puppet[:reportfrom]}"
@@ -148,7 +148,7 @@ Puppet::Reports.register_report(:tagmail) do
         rescue => detail
           message = "Could not send report emails through smtp: #{detail}"
           Puppet.log_exception(detail, message)
-          raise Puppet::Error, message
+          raise Puppet::Error, message, detail.backtrace
         end
       elsif Puppet[:sendmail] != ""
         begin
@@ -158,14 +158,14 @@ Puppet::Reports.register_report(:tagmail) do
               p.puts "From: #{Puppet[:reportfrom]}"
               p.puts "Subject: Puppet Report for #{self.host}"
               p.puts "To: " + emails.join(", ")
-
+              p.puts
               p.puts messages
             end
           end
         rescue => detail
           message = "Could not send report emails via sendmail: #{detail}"
           Puppet.log_exception(detail, message)
-          raise Puppet::Error, message
+          raise Puppet::Error, message, detail.backtrace
         end
       else
         raise Puppet::Error, "SMTP server is unset and could not find sendmail"

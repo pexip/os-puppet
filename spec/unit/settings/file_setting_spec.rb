@@ -129,7 +129,7 @@ describe Puppet::Settings::FileSetting do
       @settings = mock 'settings'
       @file = Puppet::Settings::FileSetting.new(:settings => @settings, :desc => "eh", :name => :myfile, :section => "mysect")
       @file.stubs(:create_files?).returns true
-      @settings.stubs(:value).with(:myfile).returns @basepath
+      @settings.stubs(:value).with(:myfile, nil, false).returns @basepath
     end
 
     it "should return :file as its type" do
@@ -139,26 +139,27 @@ describe Puppet::Settings::FileSetting do
     it "should skip non-existent files if 'create_files' is not enabled" do
       @file.expects(:create_files?).returns false
       @file.expects(:type).returns :file
-      File.expects(:exist?).with(@basepath).returns false
+      Puppet::FileSystem.expects(:exist?).with(@basepath).returns false
       @file.to_resource.should be_nil
     end
 
     it "should manage existent files even if 'create_files' is not enabled" do
       @file.expects(:create_files?).returns false
       @file.expects(:type).returns :file
-      File.expects(:exist?).with(@basepath).returns true
+      Puppet::FileSystem.stubs(:exist?)
+      Puppet::FileSystem.expects(:exist?).with(@basepath).returns true
       @file.to_resource.should be_instance_of(Puppet::Resource)
     end
 
     describe "on POSIX systems", :if => Puppet.features.posix? do
       it "should skip files in /dev" do
-        @settings.stubs(:value).with(:myfile).returns "/dev/file"
+        @settings.stubs(:value).with(:myfile, nil, false).returns "/dev/file"
         @file.to_resource.should be_nil
       end
     end
 
     it "should skip files whose paths are not strings" do
-      @settings.stubs(:value).with(:myfile).returns :foo
+      @settings.stubs(:value).with(:myfile, nil, false).returns :foo
       @file.to_resource.should be_nil
     end
 
@@ -169,10 +170,8 @@ describe Puppet::Settings::FileSetting do
     end
 
     it "should fully qualified returned files if necessary (#795)" do
-      @settings.stubs(:value).with(:myfile).returns "myfile"
-      path = File.join(Dir.getwd, "myfile")
-      # Dir.getwd can return windows paths with backslashes, so we normalize them using expand_path
-      path = File.expand_path(path) if Puppet.features.microsoft_windows?
+      @settings.stubs(:value).with(:myfile, nil, false).returns "myfile"
+      path = File.expand_path('myfile')
       @file.to_resource.title.should == path
     end
 
@@ -289,5 +288,11 @@ describe Puppet::Settings::FileSetting do
       @file.to_resource[:links].should == :follow
     end
   end
-end
 
+  describe "#munge" do
+    it 'does not expand the path of the special value :memory: so we can set dblocation to an in-memory database' do
+      filesetting = FileSetting.new(:settings => mock("settings"), :desc => "eh")
+      filesetting.munge(':memory:').should == ':memory:'
+    end
+  end
+end

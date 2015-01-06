@@ -11,7 +11,7 @@ end
 
 describe Puppet::FileServing::Mount::File do
   it "should be invalid if it does not have a path" do
-    lambda { Puppet::FileServing::Mount::File.new("foo").validate }.should raise_error(ArgumentError)
+    expect { Puppet::FileServing::Mount::File.new("foo").validate }.to raise_error(ArgumentError)
   end
 
   it "should be valid if it has a path" do
@@ -19,7 +19,7 @@ describe Puppet::FileServing::Mount::File do
     FileTest.stubs(:readable?).returns true
     mount = Puppet::FileServing::Mount::File.new("foo")
     mount.path = "/foo"
-    lambda { mount.validate }.should_not raise_error(ArgumentError)
+    expect { mount.validate }.not_to raise_error
   end
 
   describe "when setting the path" do
@@ -30,13 +30,13 @@ describe Puppet::FileServing::Mount::File do
 
     it "should fail if the path is not a directory" do
       FileTest.expects(:directory?).returns(false)
-      proc { @mount.path = @dir }.should raise_error(ArgumentError)
+      expect { @mount.path = @dir }.to raise_error(ArgumentError)
     end
 
     it "should fail if the path is not readable" do
       FileTest.expects(:directory?).returns(true)
       FileTest.expects(:readable?).returns(false)
-      proc { @mount.path = @dir }.should raise_error(ArgumentError)
+      expect { @mount.path = @dir }.to raise_error(ArgumentError)
     end
   end
 
@@ -85,7 +85,7 @@ describe Puppet::FileServing::Mount::File do
     include FileServingMountTesting
 
     before do
-      FileTest.stubs(:exist?).returns(true)
+      Puppet::FileSystem.stubs(:exist?).returns(true)
       FileTest.stubs(:directory?).returns(true)
       FileTest.stubs(:readable?).returns(true)
       @mount = Puppet::FileServing::Mount::File.new("test")
@@ -95,12 +95,12 @@ describe Puppet::FileServing::Mount::File do
     end
 
     it "should return nil if the file is absent" do
-      FileTest.stubs(:exist?).returns(false)
+      Puppet::FileSystem.stubs(:exist?).returns(false)
       @mount.complete_path("/my/path", nil).should be_nil
     end
 
     it "should write a log message if the file is absent" do
-      FileTest.stubs(:exist?).returns(false)
+      Puppet::FileSystem.stubs(:exist?).returns(false)
 
       Puppet.expects(:info).with("File does not exist or is not accessible: /mount/my/path")
 
@@ -108,12 +108,12 @@ describe Puppet::FileServing::Mount::File do
     end
 
     it "should return the file path if the file is present" do
-      FileTest.stubs(:exist?).with("/my/path").returns(true)
+      Puppet::FileSystem.stubs(:exist?).with("/my/path").returns(true)
       @mount.complete_path("/my/path", nil).should == "/mount/my/path"
     end
 
     it "should treat a nil file name as the path to the mount itself" do
-      FileTest.stubs(:exist?).returns(true)
+      Puppet::FileSystem.stubs(:exist?).returns(true)
       @mount.complete_path(nil, nil).should == "/mount"
     end
 
@@ -141,7 +141,7 @@ describe Puppet::FileServing::Mount::File do
     include FileServingMountTesting
 
     before do
-      FileTest.stubs(:exist?).returns(true)
+      Puppet::FileSystem.stubs(:exist?).returns(true)
       FileTest.stubs(:directory?).returns(true)
       FileTest.stubs(:readable?).returns(true)
       @mount = Puppet::FileServing::Mount::File.new("test")
@@ -153,7 +153,7 @@ describe Puppet::FileServing::Mount::File do
     end
 
     it "should return the results of the complete file path" do
-      FileTest.stubs(:exist?).returns(false)
+      Puppet::FileSystem.stubs(:exist?).returns(false)
       @mount.expects(:complete_path).with("/my/path", "foo").returns "eh"
       @mount.find("/my/path", @request).should == "eh"
     end
@@ -163,7 +163,7 @@ describe Puppet::FileServing::Mount::File do
     include FileServingMountTesting
 
     before do
-      FileTest.stubs(:exist?).returns(true)
+      Puppet::FileSystem.stubs(:exist?).returns(true)
       FileTest.stubs(:directory?).returns(true)
       FileTest.stubs(:readable?).returns(true)
       @mount = Puppet::FileServing::Mount::File.new("test")
@@ -175,13 +175,13 @@ describe Puppet::FileServing::Mount::File do
     end
 
     it "should return the results of the complete file path as an array" do
-      FileTest.stubs(:exist?).returns(false)
+      Puppet::FileSystem.stubs(:exist?).returns(false)
       @mount.expects(:complete_path).with("/my/path", "foo").returns "eh"
       @mount.search("/my/path", @request).should == ["eh"]
     end
 
     it "should return nil if the complete path is nil" do
-      FileTest.stubs(:exist?).returns(false)
+      Puppet::FileSystem.stubs(:exist?).returns(false)
       @mount.expects(:complete_path).with("/my/path", "foo").returns nil
       @mount.search("/my/path", @request).should be_nil
     end

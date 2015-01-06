@@ -1,6 +1,6 @@
 require 'puppet/util/logging'
 require 'semver'
-require 'puppet/module_tool/applications'
+require 'json'
 
 # Support for modules
 class Puppet::Module
@@ -11,6 +11,7 @@ class Puppet::Module
   class IncompatiblePlatform < Error; end
   class MissingMetadata < Error; end
   class InvalidName < Error; end
+  class InvalidFilePattern < Error; end
 
   include Puppet::Util::Logging
 
@@ -19,6 +20,7 @@ class Puppet::Module
     "files" => "files",
     "templates" => "templates",
     "plugins" => "lib",
+    "pluginfacts" => "facts.d",
   }
 
   # Find and return the +module+ that +path+ belongs to. If +path+ is
@@ -26,10 +28,12 @@ class Puppet::Module
   # of +path+, return +nil+
   def self.find(modname, environment = nil)
     return nil unless modname
-    Puppet::Node::Environment.new(environment).module(modname)
+    # Unless a specific environment is given, use the current environment
+    env = environment ? Puppet.lookup(:environments).get!(environment) : Puppet.lookup(:current_environment)
+    env.module(modname)
   end
 
-  attr_reader :name, :environment, :path
+  attr_reader :name, :environment, :path, :metadata
   attr_writer :environment
 
   attr_accessor :dependencies, :forge_name
@@ -45,15 +49,21 @@ class Puppet::Module
     load_metadata if has_metadata?
 
     validate_puppet_version
+
+    @absolute_path_to_manifests = Puppet::FileSystem::PathPattern.absolute(manifests)
   end
 
   def has_metadata?
     return false unless metadata_file
 
-    return false unless FileTest.exist?(metadata_file)
+    return false unless Puppet::FileSystem.exist?(metadata_file)
 
-    metadata = PSON.parse File.read(metadata_file)
-
+    begin
+      metadata =  JSON.parse(File.read(metadata_file))
+    rescue JSON::JSONError => e
+      Puppet.debug("#{name} has an invalid and unparsable metadata.json file.  The parse error: #{e.message}")
+      return false
+    end
 
     return metadata.is_a?(Hash) && !metadata.keys.empty?
   end
@@ -63,7 +73,7 @@ class Puppet::Module
     # we have files of a given type.
     define_method(type +'?') do
       type_subpath = subpath(location)
-      unless FileTest.exist?(type_subpath)
+      unless Puppet::FileSystem.exist?(type_subpath)
         Puppet.debug("No #{type} found in subpath '#{type_subpath}' " +
                          "(file / directory does not exist)")
         return false
@@ -86,7 +96,7 @@ class Puppet::Module
         full_path = subpath(location)
       end
 
-      return nil unless FileTest.exist?(full_path)
+      return nil unless Puppet::FileSystem.exist?(full_path)
       return full_path
     end
 
@@ -104,7 +114,7 @@ class Puppet::Module
   end
 
   def load_metadata
-    data = PSON.parse File.read(metadata_file)
+    @metadata = data = JSON.parse(File.read(metadata_file))
     @forge_name = data['name'].gsub('-', '/') if data['name']
 
     [:source, :author, :version, :license, :puppetversion, :dependencies].each do |attr|
@@ -132,10 +142,22 @@ class Puppet::Module
   # Return the list of manifests matching the given glob pattern,
   # defaulting to 'init.{pp,rb}' for empty modules.
   def match_manifests(rest)
-    pat = File.join(path, "manifests", rest || 'init')
-    [manifest("init.pp"),manifest("init.rb")].compact + Dir.
-      glob(pat + (File.extname(pat).empty? ? '.{pp,rb}' : '')).
-      reject { |f| FileTest.directory?(f) }
+    if rest
+      wanted_manifests = wanted_manifests_from(rest)
+      searched_manifests = wanted_manifests.glob.reject { |f| FileTest.directory?(f) }
+    else
+      searched_manifests = []
+    end
+
+    # (#4220) Always ensure init.pp in case class is defined there.
+    init_manifests = [manifest("init.pp"), manifest("init.rb")].compact
+    init_manifests + searched_manifests
+  end
+
+  def all_manifests
+    return [] unless Puppet::FileSystem.exist?(manifests)
+
+    Dir.glob(File.join(manifests, '**', '*.{rb,pp}'))
   end
 
   def metadata_file
@@ -152,6 +174,14 @@ class Puppet::Module
   # Find all plugin directories.  This is used by the Plugins fileserving mount.
   def plugin_directory
     subpath("lib")
+  end
+
+  def plugin_fact_directory
+    subpath("facts.d")
+  end
+
+  def has_external_facts?
+    File.directory?(plugin_fact_directory)
   end
 
   def supports(name, version = nil)
@@ -181,11 +211,15 @@ class Puppet::Module
   end
 
   def has_local_changes?
+    Puppet.deprecation_warning("This method is being removed.")
+    require 'puppet/module_tool/applications'
     changes = Puppet::ModuleTool::Applications::Checksummer.run(path)
     !changes.empty?
   end
 
   def local_changes
+    Puppet.deprecation_warning("This method is being removed.")
+    require 'puppet/module_tool/applications'
     Puppet::ModuleTool::Applications::Checksummer.run(path)
   end
 
@@ -225,7 +259,7 @@ class Puppet::Module
 
       dep_mod = begin
         environment.module_by_forge_name(forge_name)
-      rescue => e
+      rescue
         nil
       end
 
@@ -274,6 +308,19 @@ class Puppet::Module
   end
 
   private
+
+  def wanted_manifests_from(pattern)
+    begin
+      extended = File.extname(pattern).empty? ? "#{pattern}.{pp,rb}" : pattern
+      relative_pattern = Puppet::FileSystem::PathPattern.relative(extended)
+    rescue Puppet::FileSystem::PathPattern::InvalidPattern => error
+      raise Puppet::Module::InvalidFilePattern.new(
+        "The pattern \"#{pattern}\" to find manifests in the module \"#{name}\" " +
+        "is invalid and potentially unsafe.", error)
+    end
+
+    relative_pattern.prefix_with(@absolute_path_to_manifests)
+  end
 
   def subpath(type)
     File.join(path, type)

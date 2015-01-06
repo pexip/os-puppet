@@ -8,6 +8,8 @@ describe Puppet::Resource::Status do
 
   before do
     @resource = Puppet::Type.type(:file).new :path => make_absolute("/my/file")
+    @containment_path = ["foo", "bar", "baz"]
+    @resource.stubs(:pathbuilder).returns @containment_path
     @status = Puppet::Resource::Status.new(@resource)
   end
 
@@ -44,6 +46,10 @@ describe Puppet::Resource::Status do
     Puppet::Resource::Status.new(@resource).source_description.should == "/my/path"
   end
 
+  it "should set its containment path" do
+    Puppet::Resource::Status.new(@resource).containment_path.should == @containment_path
+  end
+
   [:file, :line].each do |attr|
     it "should copy the resource's #{attr}" do
       @resource.expects(attr).returns "foo"
@@ -53,7 +59,9 @@ describe Puppet::Resource::Status do
 
   it "should copy the resource's tags" do
     @resource.expects(:tags).returns %w{foo bar}
-    Puppet::Resource::Status.new(@resource).tags.should == %w{foo bar}
+    status = Puppet::Resource::Status.new(@resource)
+    status.should be_tagged("foo")
+    status.should be_tagged("bar")
   end
 
   it "should always convert the resource to a string" do
@@ -107,6 +115,14 @@ describe Puppet::Resource::Status do
     @status.events.should == [event]
   end
 
+  it "records an event for a failure caused by an error" do
+    @status.failed_because(StandardError.new("the message"))
+
+    expect(@status.events[0].message).to eq("the message")
+    expect(@status.events[0].status).to eq("failure")
+    expect(@status.events[0].name).to eq(:resource_error)
+  end
+
   it "should count the number of successful events and set changed" do
     3.times{ @status << Puppet::Transaction::Event.new(:status => 'success') }
     @status.change_count.should == 3
@@ -149,6 +165,56 @@ describe Puppet::Resource::Status do
       @status.evaluation_time = 2.7
       @status.tags = %w{one two}
       @status.to_yaml_properties.should =~ Puppet::Resource::Status::YAML_ATTRIBUTES
+    end
+  end
+
+  it "should round trip through pson" do
+    @status.file = "/foo.rb"
+    @status.line = 27
+    @status.evaluation_time = 2.7
+    @status.tags = %w{one two}
+    @status << Puppet::Transaction::Event.new(:name => :mode_changed, :status => 'audit')
+    @status.failed = false
+    @status.changed = true
+    @status.out_of_sync = true
+    @status.skipped = false
+
+    @status.containment_path.should == @containment_path
+
+    tripped = Puppet::Resource::Status.from_data_hash(PSON.parse(@status.to_pson))
+
+    tripped.title.should == @status.title
+    tripped.containment_path.should == @status.containment_path
+    tripped.file.should == @status.file
+    tripped.line.should == @status.line
+    tripped.resource.should == @status.resource
+    tripped.resource_type.should == @status.resource_type
+    tripped.evaluation_time.should == @status.evaluation_time
+    tripped.tags.should == @status.tags
+    tripped.time.should == @status.time
+    tripped.failed.should == @status.failed
+    tripped.changed.should == @status.changed
+    tripped.out_of_sync.should == @status.out_of_sync
+    tripped.skipped.should == @status.skipped
+
+    tripped.change_count.should == @status.change_count
+    tripped.out_of_sync_count.should == @status.out_of_sync_count
+    events_as_hashes(tripped).should == events_as_hashes(@status)
+  end
+
+  def events_as_hashes(report)
+    report.events.collect do |e|
+      {
+        :audited => e.audited,
+        :property => e.property,
+        :previous_value => e.previous_value,
+        :desired_value => e.desired_value,
+        :historical_value => e.historical_value,
+        :message => e.message,
+        :name => e.name,
+        :status => e.status,
+        :time => e.time,
+      }
     end
   end
 end

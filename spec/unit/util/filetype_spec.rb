@@ -16,15 +16,15 @@ describe Puppet::Util::FileType do
 
     describe "when the file already exists" do
       it "should return the file's contents when asked to read it" do
-        File.expects(:exist?).with(path).returns true
+        Puppet::FileSystem.expects(:exist?).with(path).returns true
         File.expects(:read).with(path).returns "my text"
 
         file.read.should == "my text"
       end
 
       it "should unlink the file when asked to remove it" do
-        File.expects(:exist?).with(path).returns true
-        File.expects(:unlink).with(path)
+        Puppet::FileSystem.expects(:exist?).with(path).returns true
+        Puppet::FileSystem.expects(:unlink).with(path)
 
         file.remove
       end
@@ -32,7 +32,7 @@ describe Puppet::Util::FileType do
 
     describe "when the file does not exist" do
       it "should return an empty string when asked to read the file" do
-        File.expects(:exist?).with(path).returns false
+        Puppet::FileSystem.expects(:exist?).with(path).returns false
 
         file.read.should == ""
       end
@@ -63,13 +63,13 @@ describe Puppet::Util::FileType do
 
     describe "when backing up a file" do
       it "should do nothing if the file does not exist" do
-        File.expects(:exists?).with(path).returns false
+        Puppet::FileSystem.expects(:exist?).with(path).returns false
         file.expects(:bucket).never
         file.backup
       end
 
       it "should use its filebucket to backup the file if it exists" do
-        File.expects(:exists?).with(path).returns true
+        Puppet::FileSystem.expects(:exist?).with(path).returns true
 
         bucket = mock 'bucket'
         bucket.expects(:backup).with(path)
@@ -98,6 +98,12 @@ describe Puppet::Util::FileType do
 
     it "should exist" do
       type.should_not be_nil
+    end
+
+    # make Puppet::Util::SUIDManager return something deterministic, not the
+    # uid of the user running the tests, except where overridden below.
+    before :each do
+      Puppet::Util::SUIDManager.stubs(:uid).returns 1234
     end
 
     describe "#read" do
@@ -149,7 +155,7 @@ describe Puppet::Util::FileType do
       end
 
       after :each do
-        File.should_not be_exist @tmp_cron_path
+        Puppet::FileSystem.exist?(@tmp_cron_path).should be_false
       end
 
       it "should run crontab as the target user on a temporary file" do

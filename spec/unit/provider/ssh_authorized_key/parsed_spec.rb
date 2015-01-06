@@ -51,7 +51,7 @@ describe provider_class, :unless => Puppet.features.microsoft_windows? do
     genkey(key).should == "ssh-dss AAAAfsfddsjldjgksdflgkjsfdlgkj Just_Testing\n"
   end
 
-  it "should be able to generate a authorized_keys file with options" do
+  it "should be able to generate an authorized_keys file with options" do
 
     key = mkkey(:name    => "root@localhost",
                 :key     => "AAAAfsfddsjldjgksdflgkjsfdlgkj",
@@ -99,36 +99,55 @@ describe provider_class, :unless => Puppet.features.microsoft_windows? do
     @provider_class.parse_options(optionstr).should == options
   end
 
+  it "should parse quoted options" do
+    line = 'command="/usr/local/bin/mybin \"$SSH_ORIGINAL_COMMAND\"" ssh-rsa xxx mykey'
+
+    @provider_class.parse(line)[0][:options][0].should == 'command="/usr/local/bin/mybin \"$SSH_ORIGINAL_COMMAND\""'
+  end
+
   it "should use '' as name for entries that lack a comment" do
     line = "ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAut8aOSxenjOqF527dlsdHWV4MNoAsX14l9M297+SQXaQ5Z3BedIxZaoQthkDALlV/25A1COELrg9J2MqJNQc8Xe9XQOIkBQWWinUlD/BXwoOTWEy8C8zSZPHZ3getMMNhGTBO+q/O+qiJx3y5cA4MTbw2zSxukfWC87qWwcZ64UUlegIM056vPsdZWFclS9hsROVEa57YUMrehQ1EGxT4Z5j6zIopufGFiAPjZigq/vqgcAqhAKP6yu4/gwO6S9tatBeEjZ8fafvj1pmvvIplZeMr96gHE7xS3pEEQqnB3nd4RY7AF6j9kFixnsytAUO7STPh/M3pLiVQBN89TvWPQ=="
 
     @provider_class.parse(line)[0][:name].should == ""
   end
 
-  ['ssh-dss', 'ssh-rsa', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521'].each do |keytype|
+  {
+    # ssh-keygen -t dsa -b 1024
+    'ssh-dss' => 'AAAAB3NzaC1kc3MAAACBANGTefWMXS780qLMMgysq3GNMKzg55LXZODif6Tqv1vtTh4Wuk3J5X5u644jTyNdAIn1RiBI9MnwnZMZ6nXKvucMcMQWMibYS9W2MhkRj3oqsLWMMsdGXJL18SWM5A6oC3oIRC4JHJZtkm0OctR2trKxmX+MGhdCd+Xpsh9CNK8XAAAAFQD4olFiwv+QQUFdaZbWUy1CLEG9xQAAAIByCkXKgoriZF8bQ0OX1sKuR69M/6n5ngmQGVBKB7BQkpUjbK/OggB6iJgst5utKkDcaqYRnrTYG9q3jJ/flv7yYePuoSreS0nCMMx9gpEYuq+7Sljg9IecmN/IHrNd9qdYoASy5iuROQMvEZM7KFHA8vBv0tWdBOsp4hZKyiL1DAAAAIEAjkZlOps9L+cD/MTzxDj7toYYypdLOvjlcPBaglkPZoFZ0MAKTI0zXlVX1cWAnkd0Yfo4EpP+6XAjlZkod+QXKXM4Tb4PnR34ASMeU6sEjM61Na24S7JD3gpPKataFU/oH3hzXsBdK2ttKYmoqvf61h32IA/3Z5PjCCD9pPLPpAY',
+    # ssh-keygen -t rsa -b 2048
+    'ssh-rsa' => 'AAAAB3NzaC1yc2EAAAADAQABAAABAQDYtEaWa1mlxaAh9vtiz6RCVKDiJHDY15nsqqWU7F7A1+U1498+sWDyRDkZ8vXWQpzyOMBzBSHIxhsprlKhkjomy8BuJP+bHDBIKx4zgSFDrklrPIf467Iuug8J0qqDLxO4rOOjeAiLEyC0t2ZGnsTEea+rmat0bJ2cv3g5L4gH/OFz2pI4ZLp1HGN83ipl5UH8CjXQKwo3Db1E3WJCqKgszVX0Z4/qjnBRxFMoqky/1mGb/mX1eoT9JyQ8OhU9uENZOShkksSpgUqjlrjpj0Yd14hBlnE3M18pE4ivxjzectA/XRKNZaxOL1YREtU8sXusAwmlEY4aJ64aR0JrXfgx',
+    # ssh-keygen -t ecdsa -b 256
+    'ecdsa-sha2-nistp256' => 'AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBBO5PfBf0c2jAuqD+Lj3j+SuXOXNT2uqESLVOn5jVQfEF9GzllOw+CMOpUvV1CiOOn+F1ET15vcsfmD7z05WUTA=',
+    # ssh-keygen -t ecdsa -b 384
+    'ecdsa-sha2-nistp384' => 'AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBJIfxNoVK4FX3RuMlkHOwwxXwAh6Fqx5uAp4ftXrJ+64qYuIzb+/zSAkJV698Sre1b1lb0G4LyDdVAvXwaYK9kN25vy8umV3WdfZeHKXJGCcrplMCbbOERWARlpiPNEblg==',
+    # ssh-keygen -t ecdsa -b 521
+    'ecdsa-sha2-nistp521' => 'AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBADLK+u12xwB0JOwpmaxYXv8KnPK4p+SE2405qoo+vpAQ569fMwPMgKzltd770amdeuFogw/MJu17PN9LDdrD3o0uwHMjWee6TpHQDkuEetaxiou6K0WAzgbxx9QsY0MsJgXf1BuMLqdK+xT183wOSXwwumv99G7T32dOJZ5tYrH0y4XMw==',
+    # ssh-keygen -t ed25519
+    'ssh-ed25519' => 'AAAAC3NzaC1lZDI1NTE5AAAAIBWvu7D1KHBPaNXQcEuBsp48+JyPelXAq8ds6K5Du9gd',
+  }.each_pair do |keytype, keydata|
     it "should be able to parse a #{keytype} key entry" do
-      # use some real world examples generated with ssh-keygen
-      key = case keytype
-        when 'ssh-dss' # ssh-keygen -t dsa -b 1024
-          'AAAAB3NzaC1kc3MAAACBANGTefWMXS780qLMMgysq3GNMKzg55LXZODif6Tqv1vtTh4Wuk3J5X5u644jTyNdAIn1RiBI9MnwnZMZ6nXKvucMcMQWMibYS9W2MhkRj3oqsLWMMsdGXJL18SWM5A6oC3oIRC4JHJZtkm0OctR2trKxmX+MGhdCd+Xpsh9CNK8XAAAAFQD4olFiwv+QQUFdaZbWUy1CLEG9xQAAAIByCkXKgoriZF8bQ0OX1sKuR69M/6n5ngmQGVBKB7BQkpUjbK/OggB6iJgst5utKkDcaqYRnrTYG9q3jJ/flv7yYePuoSreS0nCMMx9gpEYuq+7Sljg9IecmN/IHrNd9qdYoASy5iuROQMvEZM7KFHA8vBv0tWdBOsp4hZKyiL1DAAAAIEAjkZlOps9L+cD/MTzxDj7toYYypdLOvjlcPBaglkPZoFZ0MAKTI0zXlVX1cWAnkd0Yfo4EpP+6XAjlZkod+QXKXM4Tb4PnR34ASMeU6sEjM61Na24S7JD3gpPKataFU/oH3hzXsBdK2ttKYmoqvf61h32IA/3Z5PjCCD9pPLPpAY'
-        when 'ssh-rsa' # ssh-keygen -t rsa -b 2048
-          'AAAAB3NzaC1yc2EAAAADAQABAAABAQDYtEaWa1mlxaAh9vtiz6RCVKDiJHDY15nsqqWU7F7A1+U1498+sWDyRDkZ8vXWQpzyOMBzBSHIxhsprlKhkjomy8BuJP+bHDBIKx4zgSFDrklrPIf467Iuug8J0qqDLxO4rOOjeAiLEyC0t2ZGnsTEea+rmat0bJ2cv3g5L4gH/OFz2pI4ZLp1HGN83ipl5UH8CjXQKwo3Db1E3WJCqKgszVX0Z4/qjnBRxFMoqky/1mGb/mX1eoT9JyQ8OhU9uENZOShkksSpgUqjlrjpj0Yd14hBlnE3M18pE4ivxjzectA/XRKNZaxOL1YREtU8sXusAwmlEY4aJ64aR0JrXfgx'
-        when 'ecdsa-sha2-nistp256' # ssh-keygen -t ecdsa -b 256
-          'AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBBO5PfBf0c2jAuqD+Lj3j+SuXOXNT2uqESLVOn5jVQfEF9GzllOw+CMOpUvV1CiOOn+F1ET15vcsfmD7z05WUTA='
-        when 'ecdsa-sha2-nistp384' # ssh-keygen -t ecdsa -b 384
-          'AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBJIfxNoVK4FX3RuMlkHOwwxXwAh6Fqx5uAp4ftXrJ+64qYuIzb+/zSAkJV698Sre1b1lb0G4LyDdVAvXwaYK9kN25vy8umV3WdfZeHKXJGCcrplMCbbOERWARlpiPNEblg=='
-        when 'ecdsa-sha2-nistp521' #ssh-keygen -t ecdsa -b 521
-          'AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBADLK+u12xwB0JOwpmaxYXv8KnPK4p+SE2405qoo+vpAQ569fMwPMgKzltd770amdeuFogw/MJu17PN9LDdrD3o0uwHMjWee6TpHQDkuEetaxiou6K0WAzgbxx9QsY0MsJgXf1BuMLqdK+xT183wOSXwwumv99G7T32dOJZ5tYrH0y4XMw=='
-        else
-          pending("No sample key for #{keytype} yet")
-      end
       comment = 'sample_key'
 
-      record = @provider_class.parse_line("#{keytype} #{key} #{comment}")
+      record = @provider_class.parse_line("#{keytype} #{keydata} #{comment}")
       record.should_not be_nil
       record[:name].should == comment
-      record[:key].should == key
+      record[:key].should == keydata
       record[:type].should == keytype
+    end
+  end
+
+  describe "prefetch_hook" do
+    let(:path) { '/path/to/keyfile' }
+    let(:input) do
+      { :type        => 'rsa',
+        :key         => 'KEYDATA',
+        :name        => '',
+        :record_type => :parsed,
+        :target      => path,
+      }
+    end
+    it "adds an indexed name to unnamed resources" do
+      @provider_class.prefetch_hook([input])[0][:name].should =~ /^#{path}:unnamed-\d+/
     end
   end
 
@@ -162,7 +181,7 @@ describe provider_class, :unless => Puppet.features.microsoft_windows? do
       end
 
       it "should create the directory" do
-        File.stubs(:exist?).with("/tmp/.ssh_dir").returns false
+        Puppet::FileSystem.stubs(:exist?).with("/tmp/.ssh_dir").returns false
         Dir.expects(:mkdir).with("/tmp/.ssh_dir", 0700)
         @provider.flush
       end
@@ -199,19 +218,19 @@ describe provider_class, :unless => Puppet.features.microsoft_windows? do
       end
 
       it "should create the directory if it doesn't exist" do
-        File.stubs(:exist?).with(@dir).returns false
+        Puppet::FileSystem.stubs(:exist?).with(@dir).returns false
         Dir.expects(:mkdir).with(@dir,0700)
         @provider.flush
       end
 
       it "should not create or chown the directory if it already exist" do
-        File.stubs(:exist?).with(@dir).returns false
+        Puppet::FileSystem.stubs(:exist?).with(@dir).returns false
         Dir.expects(:mkdir).never
         @provider.flush
       end
 
       it "should absolutely not chown the directory to the user if it creates it" do
-        File.stubs(:exist?).with(@dir).returns false
+        Puppet::FileSystem.stubs(:exist?).with(@dir).returns false
         Dir.stubs(:mkdir).with(@dir,0700)
         uid = Puppet::Util.uid("nobody")
         File.expects(:chown).never
@@ -219,7 +238,7 @@ describe provider_class, :unless => Puppet.features.microsoft_windows? do
       end
 
       it "should not create or chown the directory if it already exist" do
-        File.stubs(:exist?).with(@dir).returns false
+        Puppet::FileSystem.stubs(:exist?).with(@dir).returns false
         Dir.expects(:mkdir).never
         File.expects(:chown).never
         @provider.flush
@@ -246,7 +265,7 @@ describe provider_class, :unless => Puppet.features.microsoft_windows? do
       end
     end
 
-    describe "and a invalid user has been specified with no target" do
+    describe "and an invalid user has been specified with no target" do
       it "should catch an exception and raise a Puppet error" do
         @resource[:user] = "thisusershouldnotexist"
 

@@ -22,8 +22,6 @@ describe Puppet::SSL::Host do
 
   after {
     Puppet::SSL::Host.ca_location = :none
-
-    Puppet.settings.clear
   }
 
   it "should be considered a CA host if its name is equal to 'ca'" do
@@ -70,7 +68,7 @@ describe Puppet::SSL::Host do
       @ca = Puppet::SSL::Host.new(Puppet::SSL::Host.ca_name)
       @ca.generate_key
 
-      FileTest.should_not be_exist(File.join(Puppet[:privatekeydir], "ca.pem"))
+      Puppet::FileSystem.exist?(File.join(Puppet[:privatekeydir], "ca.pem")).should be_false
     end
   end
 

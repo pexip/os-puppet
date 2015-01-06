@@ -9,7 +9,7 @@ uses CSV files but the concept can easily be adjust for databases, yaml
 or any other queryable data source.
 
 The object of this is to make it obvious when it's being used, rather than
-magically loading data in when an module is loaded I prefer to look at the code
+magically loading data in when a module is loaded I prefer to look at the code
 and see statements like:
 
     $snmp_contact = extlookup(\"snmp_contact\")
@@ -26,7 +26,7 @@ Over time there will be a lot of this kind of thing spread all over your manifes
 and adding an additional client involves grepping through manifests to find all the
 places where you have constructs like this.
 
-This is a data problem and shouldn't be handled in code, a using this function you
+This is a data problem and shouldn't be handled in code, and using this function you
 can do just that.
 
 First you configure it in site.pp:
@@ -100,7 +100,7 @@ This is for back compatibility to interpolate variables with %. % interpolation 
 
   # if we got a custom data file, put it first in the array of search files
   if datafile != ""
-    datafiles << extlookup_datadir + "/#{datafile}.csv" if File.exists?(extlookup_datadir + "/#{datafile}.csv")
+    datafiles << extlookup_datadir + "/#{datafile}.csv" if Puppet::FileSystem.exist?(extlookup_datadir + "/#{datafile}.csv")
   end
 
   extlookup_precedence.each do |d|
@@ -111,7 +111,7 @@ This is for back compatibility to interpolate variables with %. % interpolation 
 
   datafiles.each do |file|
     if desired.nil?
-      if File.exists?(file)
+      if Puppet::FileSystem.exist?(file)
         result = CSV.read(file).find_all do |r|
           r[0] == key
         end

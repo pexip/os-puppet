@@ -6,11 +6,9 @@ describe Puppet::ModuleTool::Applications::Searcher do
   include PuppetSpec::Files
 
   describe "when searching" do
-    let(:forge) { mock 'forge' }
+    let(:forge) { mock 'forge', :host => 'http://nowhe.re' }
     let(:searcher) do
-      pending("porting to Windows", :if => Puppet.features.microsoft_windows?) do
-        described_class.new('search_term', forge)
-      end
+      described_class.new('search_term', forge)
     end
 
     it "should return results from a forge query when successful" do

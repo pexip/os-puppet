@@ -41,20 +41,32 @@ class Puppet::Util::Instrumentation::Listener
     { :data => @listener.data }
   end
 
-  def to_pson(*args)
-    result = {
-      :document_type => "Puppet::Util::Instrumentation::Listener",
-      :data => {
-        :name => name,
-        :pattern => pattern,
-        :enabled => enabled?
-      }
+  def to_data_hash
+    {
+      :name => name,
+      :pattern => pattern,
+      :enabled => enabled?
     }
-    result.to_pson(*args)
+  end
+
+  def to_pson_data_hash
+    {
+      :document_type => "Puppet::Util::Instrumentation::Listener",
+      :data => to_data_hash,
+    }
+  end
+
+  def to_pson(*args)
+    to_pson_data_hash.to_pson(*args)
+  end
+
+  def self.from_data_hash(data)
+    result = Puppet::Util::Instrumentation[data["name"]]
+    self.new(result.listener, result.pattern, data["enabled"])
   end
 
   def self.from_pson(data)
-    result = Puppet::Util::Instrumentation[data["name"]]
-    self.new(result.listener, result.pattern, data["enabled"])
+    Puppet.deprecation_warning("from_pson is being removed in favour of from_data_hash.")
+    self.from_data_hash(data)
   end
 end

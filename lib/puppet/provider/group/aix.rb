@@ -9,7 +9,7 @@ require 'puppet/provider/aixobject'
 Puppet::Type.type(:group).provide :aix, :parent => Puppet::Provider::AixObject do
   desc "Group management for AIX."
 
-  # This will the the default provider for this platform
+  # This will the default provider for this platform
   defaultfor :operatingsystem => :aix
   confine :operatingsystem => :aix
 
@@ -116,7 +116,7 @@ Puppet::Type.type(:group).provide :aix, :parent => Puppet::Provider::AixObject d
   end
 
   def attributes
-    filter_attributes(getosinfo(refresh = false))
+    filter_attributes(getosinfo(false))
   end
 
   def attributes=(attr_hash)
@@ -127,7 +127,7 @@ Puppet::Type.type(:group).provide :aix, :parent => Puppet::Provider::AixObject d
       begin
         execute(cmd)
       rescue Puppet::ExecutionFailure  => detail
-        raise Puppet::Error, "Could not set #{param} on #{@resource.class.name}[#{@resource.name}]: #{detail}"
+        raise Puppet::Error, "Could not set #{param} on #{@resource.class.name}[#{@resource.name}]: #{detail}", detail.backtrace
       end
     end
   end

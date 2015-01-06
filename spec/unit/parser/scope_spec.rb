@@ -1,8 +1,11 @@
 #! /usr/bin/env ruby
 require 'spec_helper'
 require 'puppet_spec/compiler'
+require 'puppet_spec/scope'
 
 describe Puppet::Parser::Scope do
+  include PuppetSpec::Scope
+
   before :each do
     @scope = Puppet::Parser::Scope.new(
       Puppet::Parser::Compiler.new(Puppet::Node.new("foo"))
@@ -12,26 +15,26 @@ describe Puppet::Parser::Scope do
     @scope.parent = @topscope
   end
 
-  describe ".new_for_test_harness" do
+  describe "create_test_scope_for_node" do
     let(:node_name) { "node_name_foo" }
-    let(:scope) { described_class.new_for_test_harness(node_name) }
+    let(:scope) { create_test_scope_for_node(node_name) }
 
     it "should be a kind of Scope" do
-      scope.should be_a_kind_of Puppet::Parser::Scope
+      scope.should be_a_kind_of(Puppet::Parser::Scope)
     end
     it "should set the source to a node resource" do
-      scope.source.should be_a_kind_of Puppet::Resource::Type
+      scope.source.should be_a_kind_of(Puppet::Resource::Type)
     end
     it "should have a compiler" do
-      scope.compiler.should be_a_kind_of Puppet::Parser::Compiler
+      scope.compiler.should be_a_kind_of(Puppet::Parser::Compiler)
     end
     it "should set the parent to the compiler topscope" do
-      scope.parent.should be scope.compiler.topscope
+      scope.parent.should be(scope.compiler.topscope)
     end
   end
 
   it "should return a scope for use in a test harness" do
-    described_class.new_for_test_harness("node_name_foo").should be_a_kind_of Puppet::Parser::Scope
+    create_test_scope_for_node("node_name_foo").should be_a_kind_of(Puppet::Parser::Scope)
   end
 
   it "should be able to retrieve class scopes by name" do
@@ -61,7 +64,7 @@ describe Puppet::Parser::Scope do
   end
 
   it "should get its environment from its compiler" do
-    env = Puppet::Node::Environment.new
+    env = Puppet::Node::Environment.create(:testing, [])
     compiler = stub 'compiler', :environment => env, :is_a? => true
     scope = Puppet::Parser::Scope.new(compiler)
     scope.environment.should equal(env)
@@ -84,39 +87,41 @@ describe Puppet::Parser::Scope do
   end
 
   describe "when custom functions are called" do
-    before :each do
-      @env      = Puppet::Node::Environment.new('testing')
-      @compiler = Puppet::Parser::Compiler.new(Puppet::Node.new('foo', :environment => @env))
-      @scope    = Puppet::Parser::Scope.new(@compiler)
+    let(:env) { Puppet::Node::Environment.create(:testing, []) }
+    let(:compiler) { Puppet::Parser::Compiler.new(Puppet::Node.new('foo', :environment => env)) }
+    let(:scope) { Puppet::Parser::Scope.new(compiler) }
+
+    it "calls methods prefixed with function_ as custom functions" do
+      scope.function_sprintf(["%b", 123]).should == "1111011"
     end
 
-    it "should load and call the method if it looks like a function and it exists" do
-      @scope.function_sprintf(["%b", 123]).should == "1111011"
+    it "raises an error when arguments are not passed in an Array" do
+      expect do
+        scope.function_sprintf("%b", 123)
+      end.to raise_error ArgumentError, /custom functions must be called with a single array that contains the arguments/
     end
 
-    it "should raise and error when called without an Array" do
-      expect { @scope.function_sprintf("%b", 123) }.to raise_error ArgumentError, /custom functions must be called with a single array that contains the arguments/
+    it "raises an error on subsequent calls when arguments are not passed in an Array" do
+      scope.function_sprintf(["first call"])
+
+      expect do
+        scope.function_sprintf("%b", 123)
+      end.to raise_error ArgumentError, /custom functions must be called with a single array that contains the arguments/
     end
 
-    it "should raise and error when subsequent calls are without an Array" do
-      @scope.function_sprintf(["first call"])
-
-      expect { @scope.function_sprintf("%b", 123) }.to raise_error ArgumentError, /custom functions must be called with a single array that contains the arguments/
+    it "raises NoMethodError when the not prefixed" do
+      expect { scope.sprintf(["%b", 123]) }.to raise_error(NoMethodError)
     end
 
-    it "should raise NoMethodError if the method doesn't look like a function" do
-      expect { @scope.sprintf(["%b", 123]) }.to raise_error(NoMethodError)
-    end
-
-    it "should raise NoMethodError if the method looks like a function but doesn't exist" do
-      expect { @scope.function_fake_bs(['cows']) }.to raise_error(NoMethodError)
+    it "raises NoMethodError when prefixed with function_ but it doesn't exist" do
+      expect { scope.function_fake_bs(['cows']) }.to raise_error(NoMethodError)
     end
   end
 
   describe "when initializing" do
     it "should extend itself with its environment's Functions module as well as the default" do
-      env = Puppet::Node::Environment.new("myenv")
-      root = Puppet::Node::Environment.root
+      env = Puppet::Node::Environment.create(:myenv, [])
+      root = Puppet.lookup(:root_environment)
       compiler = stub 'compiler', :environment => env, :is_a? => true
 
       scope = Puppet::Parser::Scope.new(compiler)
@@ -125,7 +130,7 @@ describe Puppet::Parser::Scope do
     end
 
     it "should extend itself with the default Functions module if its environment is the default" do
-      root     = Puppet::Node::Environment.root
+      root     = Puppet.lookup(:root_environment)
       node     = Puppet::Node.new('localhost')
       compiler = Puppet::Parser::Compiler.new(node)
       scope    = Puppet::Parser::Scope.new(compiler)
@@ -140,8 +145,8 @@ describe Puppet::Parser::Scope do
     end
 
     it "should fail if invoked with a non-string name" do
-      expect { @scope[:foo] }.to raise_error Puppet::DevError
-      expect { @scope[:foo] = 12 }.to raise_error Puppet::DevError
+      expect { @scope[:foo] }.to raise_error(Puppet::ParseError, /Scope variable name .* not a string/)
+      expect { @scope[:foo] = 12 }.to raise_error(Puppet::ParseError, /Scope variable name .* not a string/)
     end
 
     it "should return nil for unset variables" do
@@ -183,18 +188,6 @@ describe Puppet::Parser::Scope do
 
     it "should be able to detect when variables are not set" do
       @scope.should_not be_include("var")
-    end
-
-    it "should support iteration over its variables" do
-      @scope["one"] = "two"
-      @scope["three"] = "four"
-      hash = {}
-      @scope.each { |name, value| hash[name] = value }
-      hash.should == {"one" => "two", "three" => "four" }
-    end
-
-    it "should include Enumerable" do
-      @scope.singleton_class.ancestors.should be_include(Enumerable)
     end
 
     describe "and the variable is qualified" do
@@ -273,6 +266,20 @@ describe Puppet::Parser::Scope do
         @scope.stubs(:warning)
         klass = newclass("other::deep::klass")
         @scope["other::deep::klass::var"].should be_nil
+      end
+    end
+
+    context "and strict_variables is true" do
+      before(:each) do
+        Puppet[:strict_variables] = true
+      end
+
+      it "should raise an error when unknown variable is looked up" do
+        expect { @scope['john_doe'] }.to raise_error(/Undefined variable/)
+      end
+
+      it "should raise an error when unknown qualified variable is looked up" do
+        expect { @scope['nowhere::john_doe'] }.to raise_error(/Undefined variable/)
       end
     end
   end
@@ -387,50 +394,42 @@ describe Puppet::Parser::Scope do
 
   describe "when using ephemeral variables" do
     it "should store the variable value" do
-      @scope.setvar("1", :value, :ephemeral => true)
-
+#      @scope.setvar("1", :value, :ephemeral => true)
+      @scope.set_match_data({1 => :value})
       @scope["1"].should == :value
     end
 
-    it "should remove the variable value when unset_ephemeral_var is called" do
-      @scope.setvar("1", :value, :ephemeral => true)
+    it "should remove the variable value when unset_ephemeral_var(:all) is called" do
+#      @scope.setvar("1", :value, :ephemeral => true)
+      @scope.set_match_data({1 => :value})
       @scope.stubs(:parent).returns(nil)
 
-      @scope.unset_ephemeral_var
+      @scope.unset_ephemeral_var(:all)
 
       @scope["1"].should be_nil
     end
 
-    it "should not remove classic variables when unset_ephemeral_var is called" do
+    it "should not remove classic variables when unset_ephemeral_var(:all) is called" do
       @scope['myvar'] = :value1
-      @scope.setvar("1", :value2, :ephemeral => true)
+      @scope.set_match_data({1 => :value2})
       @scope.stubs(:parent).returns(nil)
 
-      @scope.unset_ephemeral_var
+      @scope.unset_ephemeral_var(:all)
 
       @scope["myvar"].should == :value1
     end
 
-    it "should raise an error when setting it again" do
-      @scope.setvar("1", :value2, :ephemeral => true)
+    it "should raise an error when setting numerical variable" do
       expect {
         @scope.setvar("1", :value3, :ephemeral => true)
-      }.to raise_error(Puppet::ParseError, /Cannot reassign variable 1/)
-    end
-
-    it "should declare ephemeral number only variable names" do
-      @scope.ephemeral?("0").should be_true
-    end
-
-    it "should not declare ephemeral other variable names" do
-      @scope.ephemeral?("abc0").should be_nil
+      }.to raise_error(Puppet::ParseError, /Cannot assign to a numeric match result variable/)
     end
 
     describe "with more than one level" do
       it "should prefer latest ephemeral scopes" do
-        @scope.setvar("0", :earliest, :ephemeral => true)
+        @scope.set_match_data({0 => :earliest})
         @scope.new_ephemeral
-        @scope.setvar("0", :latest, :ephemeral => true)
+        @scope.set_match_data({0 => :latest})
         @scope["0"].should == :latest
       end
 
@@ -440,56 +439,68 @@ describe Puppet::Parser::Scope do
         @scope.ephemeral_level.should == 2
       end
 
-      it "should check presence of an ephemeral variable accross multiple levels" do
+      it "should not check presence of an ephemeral variable accross multiple levels" do
+        # This test was testing that scope actuallys screwed up - making values from earlier matches show as if they
+        # where true for latest match - insanity !
         @scope.new_ephemeral
-        @scope.setvar("1", :value1, :ephemeral => true)
+        @scope.set_match_data({1 => :value1})
         @scope.new_ephemeral
-        @scope.setvar("0", :value2, :ephemeral => true)
+        @scope.set_match_data({0 => :value2})
         @scope.new_ephemeral
-        @scope.ephemeral_include?("1").should be_true
+        @scope.include?("1").should be_false
       end
 
       it "should return false when an ephemeral variable doesn't exist in any ephemeral scope" do
         @scope.new_ephemeral
-        @scope.setvar("1", :value1, :ephemeral => true)
+        @scope.set_match_data({1 => :value1})
         @scope.new_ephemeral
-        @scope.setvar("0", :value2, :ephemeral => true)
+        @scope.set_match_data({0 => :value2})
         @scope.new_ephemeral
-        @scope.ephemeral_include?("2").should be_false
+        @scope.include?("2").should be_false
       end
 
-      it "should get ephemeral values from earlier scope when not in later" do
-        @scope.setvar("1", :value1, :ephemeral => true)
+      it "should not get ephemeral values from earlier scope when not in later" do
+        @scope.set_match_data({1 => :value1})
         @scope.new_ephemeral
-        @scope.setvar("0", :value2, :ephemeral => true)
-        @scope["1"].should == :value1
-      end
-
-      describe "when calling unset_ephemeral_var without a level" do
-        it "should remove all the variables values"  do
-          @scope.setvar("1", :value1, :ephemeral => true)
-          @scope.new_ephemeral
-          @scope.setvar("1", :value2, :ephemeral => true)
-
-          @scope.unset_ephemeral_var
-
-          @scope["1"].should be_nil
-        end
+        @scope.set_match_data({0 => :value2})
+        @scope.include?("1").should be_false
       end
 
       describe "when calling unset_ephemeral_var with a level" do
         it "should remove ephemeral scopes up to this level" do
-          @scope.setvar("1", :value1, :ephemeral => true)
+          @scope.set_match_data({1 => :value1})
           @scope.new_ephemeral
-          @scope.setvar("1", :value2, :ephemeral => true)
+          @scope.set_match_data({1 => :value2})
+          level = @scope.ephemeral_level()
           @scope.new_ephemeral
-          @scope.setvar("1", :value3, :ephemeral => true)
+          @scope.set_match_data({1 => :value3})
 
-          @scope.unset_ephemeral_var(2)
+          @scope.unset_ephemeral_var(level)
 
           @scope["1"].should == :value2
         end
       end
+    end
+  end
+
+  context "when using ephemeral as local scope" do
+    it "should store all variables in local scope" do
+      @scope.new_ephemeral true
+      @scope.setvar("apple", :fruit)
+      @scope["apple"].should == :fruit
+    end
+
+    it "should remove all local scope variables on unset" do
+      @scope.new_ephemeral true
+      @scope.setvar("apple", :fruit)
+      @scope["apple"].should == :fruit
+      @scope.unset_ephemeral_var
+      @scope["apple"].should == nil
+    end
+    it "should be created from a hash" do
+      @scope.ephemeral_from({ "apple" => :fruit, "strawberry" => :berry})
+      @scope["apple"].should == :fruit
+      @scope["strawberry"].should == :berry
     end
   end
 
@@ -508,22 +519,37 @@ describe Puppet::Parser::Scope do
     end
 
     it "should set $0 with the full match" do
-      @scope.expects(:setvar).with { |*arg| arg[0] == "0" and arg[1] == "this is a string" and arg[2][:ephemeral] }
-
+      # This is an internal impl detail test
+      @scope.expects(:new_match_scope).with { |*arg| arg[0][0] == "this is a string" }
       @scope.ephemeral_from(@match)
     end
 
     it "should set every capture as ephemeral var" do
-      @match.stubs(:captures).returns([:capture1,:capture2])
-      @scope.expects(:setvar).with { |*arg| arg[0] == "1" and arg[1] == :capture1 and arg[2][:ephemeral] }
-      @scope.expects(:setvar).with { |*arg| arg[0] == "2" and arg[1] == :capture2 and arg[2][:ephemeral] }
+      # This is an internal impl detail test
+      @match.stubs(:[]).with(1).returns(:capture1)
+      @match.stubs(:[]).with(2).returns(:capture2)
+      @scope.expects(:new_match_scope).with { |*arg| arg[0][1] == :capture1 && arg[0][2] == :capture2 }
 
       @scope.ephemeral_from(@match)
     end
 
-    it "should create a new ephemeral level" do
-      @scope.expects(:new_ephemeral)
+    it "should shadow previous match variables" do
+      # This is an internal impl detail test
+      @match.stubs(:[]).with(1).returns(:capture1)
+      @match.stubs(:[]).with(2).returns(:capture2)
+
+      @match2 = stub 'match', :is_a? => true
+      @match2.stubs(:[]).with(1).returns(:capture2_1)
+      @match2.stubs(:[]).with(2).returns(nil)
       @scope.ephemeral_from(@match)
+      @scope.ephemeral_from(@match2)
+      @scope.lookupvar('2').should == nil
+    end
+
+    it "should create a new ephemeral level" do
+      level_before = @scope.ephemeral_level
+      @scope.ephemeral_from(@match)
+      expect(level_before < @scope.ephemeral_level)
     end
   end
 
@@ -587,6 +613,49 @@ describe Puppet::Parser::Scope do
       it "should treat #{input.inspect} as #{output}" do
         Puppet::Parser::Scope.true?(input).should == output
       end
+    end
+  end
+
+  context "when producing a hash of all variables (as used in templates)" do
+    it "should contain all defined variables in the scope" do
+      @scope.setvar("orange", :tangerine)
+      @scope.setvar("pear", :green)
+      @scope.to_hash.should == {'orange' => :tangerine, 'pear' => :green }
+    end
+
+    it "should contain variables in all local scopes (#21508)" do
+      @scope.new_ephemeral true
+      @scope.setvar("orange", :tangerine)
+      @scope.setvar("pear", :green)
+      @scope.new_ephemeral true
+      @scope.setvar("apple", :red)
+      @scope.to_hash.should == {'orange' => :tangerine, 'pear' => :green, 'apple' => :red }
+    end
+
+    it "should contain all defined variables in the scope and all local scopes" do
+      @scope.setvar("orange", :tangerine)
+      @scope.setvar("pear", :green)
+      @scope.new_ephemeral true
+      @scope.setvar("apple", :red)
+      @scope.to_hash.should == {'orange' => :tangerine, 'pear' => :green, 'apple' => :red }
+    end
+
+    it "should not contain varaibles in match scopes (non local emphemeral)" do
+      @scope.new_ephemeral true
+      @scope.setvar("orange", :tangerine)
+      @scope.setvar("pear", :green)
+      @scope.ephemeral_from(/(f)(o)(o)/.match('foo'))
+      @scope.to_hash.should == {'orange' => :tangerine, 'pear' => :green }
+    end
+
+    it "should delete values that are :undef in inner scope" do
+      @scope.new_ephemeral true
+      @scope.setvar("orange", :tangerine)
+      @scope.setvar("pear", :green)
+      @scope.new_ephemeral true
+      @scope.setvar("apple", :red)
+      @scope.setvar("orange", :undef)
+      @scope.to_hash.should == {'pear' => :green, 'apple' => :red }
     end
   end
 end

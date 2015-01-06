@@ -21,7 +21,7 @@ module Puppet
 #      Puppet::Application::Example.new.run
 #
 #
-# class Puppet::Application::Example << Puppet::Application
+# class Puppet::Application::Example < Puppet::Application
 #
 #     def preinit
 #         # perform some pre initialization
@@ -87,7 +87,7 @@ module Puppet
 #
 # === Setup
 # Applications can use the setup block to perform any initialization.
-# The defaul +setup+ behaviour is to: read Puppet configuration and manage log level and destination
+# The default +setup+ behaviour is to: read Puppet configuration and manage log level and destination
 #
 # === What and how to run
 # If the +dispatch+ block is defined it is called. This block should return the name of the registered command
@@ -97,7 +97,7 @@ module Puppet
 # === Execution state
 # The class attributes/methods of Puppet::Application serve as a global place to set and query the execution
 # status of the application: stopping, restarting, etc.  The setting of the application status does not directly
-# aftect its running status; it's assumed that the various components within the application will consult these
+# affect its running status; it's assumed that the various components within the application will consult these
 # settings appropriately and affect their own processing accordingly.  Control operations (signal handlers and
 # the like) should set the status appropriately to indicate to the overall system that it's the process of
 # stopping or restarting (or just running as usual).
@@ -353,7 +353,23 @@ class Application
       plugin_hook('initialize_app_defaults') { initialize_app_defaults }
     end
 
-    require 'puppet'
+    Puppet.push_context(Puppet.base_context(Puppet.settings), "Update for application settings (#{self.class.run_mode})")
+    # This use of configured environment is correct, this is used to establish
+    # the defaults for an application that does not override, or where an override
+    # has not been made from the command line.
+    #
+    configured_environment_name = Puppet[:environment]
+    if self.class.run_mode.name == :agent
+      configured_environment = Puppet::Node::Environment.remote(configured_environment_name)
+    else
+      configured_environment = Puppet.lookup(:environments).get!(configured_environment_name)
+    end
+    configured_environment = configured_environment.override_from_commandline(Puppet.settings)
+
+    # Setup a new context using the app's configuration
+    Puppet.push_context({ :current_environment => configured_environment },
+                    "Update current environment from application's configuration")
+
     require 'puppet/util/instrumentation'
     Puppet::Util::Instrumentation.init
 
@@ -361,6 +377,7 @@ class Application
     exit_on_fail("parse application options")                    { plugin_hook('parse_options') { parse_options } }
     exit_on_fail("prepare for execution")                        { plugin_hook('setup')         { setup } }
     exit_on_fail("configure routes from #{Puppet[:route_file]}") { configure_indirector_routes }
+    exit_on_fail("log runtime debug info")                       { log_runtime_environment }
     exit_on_fail("run")                                          { plugin_hook('run_command')   { run_command } }
   end
 
@@ -377,32 +394,66 @@ class Application
   end
 
   def setup_logs
-    if options[:debug] or options[:verbose]
+    if options[:debug] || options[:verbose]
       Puppet::Util::Log.newdestination(:console)
-      if options[:debug]
-        Puppet::Util::Log.level = :debug
-      else
-        Puppet::Util::Log.level = :info
-      end
     end
+
+    set_log_level
 
     Puppet::Util::Log.setup_default unless options[:setdest]
   end
 
+  def set_log_level
+    if options[:debug]
+      Puppet::Util::Log.level = :debug
+    elsif options[:verbose]
+      Puppet::Util::Log.level = :info
+    end
+  end
+
+  def handle_logdest_arg(arg)
+    begin
+      Puppet::Util::Log.newdestination(arg)
+      options[:setdest] = true
+    rescue => detail
+      Puppet.log_exception(detail)
+    end
+  end
+
   def configure_indirector_routes
     route_file = Puppet[:route_file]
-    if ::File.exists?(route_file)
+    if Puppet::FileSystem.exist?(route_file)
       routes = YAML.load_file(route_file)
       application_routes = routes[name.to_s]
       Puppet::Indirector.configure_routes(application_routes) if application_routes
     end
   end
 
+  # Output basic information about the runtime environment for debugging
+  # purposes.
+  #
+  # @api public
+  #
+  # @param extra_info [Hash{String => #to_s}] a flat hash of extra information
+  #   to log. Intended to be passed to super by subclasses.
+  # @return [void]
+  def log_runtime_environment(extra_info=nil)
+    runtime_info = {
+      'puppet_version' => Puppet.version,
+      'ruby_version'   => RUBY_VERSION,
+      'run_mode'       => self.class.run_mode.name,
+    }
+    runtime_info['default_encoding'] = Encoding.default_external if RUBY_VERSION >= '1.9.3'
+    runtime_info.merge!(extra_info) unless extra_info.nil?
+
+    Puppet.debug 'Runtime environment: ' + runtime_info.map{|k,v| k + '=' + v.to_s}.join(', ')
+  end
+
   def parse_options
     # Create an option parser
     option_parser = OptionParser.new(self.class.banner)
 
-    # He're we're building up all of the options that the application may need to handle.  The main
+    # Here we're building up all of the options that the application may need to handle.  The main
     # puppet settings defined in "defaults.rb" have already been parsed once (in command_line.rb) by
     # the time we get here; however, our app may wish to handle some of them specially, so we need to
     # make the parser aware of them again.  We might be able to make this a bit more efficient by

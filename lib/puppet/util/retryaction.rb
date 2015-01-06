@@ -14,7 +14,6 @@ module Puppet::Util::RetryAction
     raise RetryException::NoRetriesGiven if parameters[:retries].nil?
     parameters[:retry_exceptions] ||= Hash.new
 
-    start = Time.now
     failures = 0
 
     begin
@@ -24,7 +23,7 @@ module Puppet::Util::RetryAction
       # catch the excptions we care about and retry.
       # All others fail hard
 
-      raise RetryException::RetriesExceeded if parameters[:retries] == 0
+      raise RetryException::RetriesExceeded, "#{parameters[:retries]} exceeded", e.backtrace if parameters[:retries] == 0
 
       if (not parameters[:retry_exceptions].keys.empty?) and parameters[:retry_exceptions].keys.include?(e.class)
         Puppet.info("Caught exception #{e.class}:#{e}")

@@ -17,6 +17,10 @@ describe provider_class do
     provider
   end
 
+  before :each do
+    resource.provider = provider
+  end
+
   describe "when installing" do
     it "should use the path to the gem" do
       provider_class.stubs(:command).with(:gemcmd).returns "/my/gem"
@@ -29,23 +33,29 @@ describe provider_class do
       provider.install
     end
 
-    it "should specify that dependencies should be included" do
-      provider.expects(:execute).with { |args| args[2] == "--include-dependencies" }.returns ""
-      provider.install
-    end
-
     it "should specify that documentation should not be included" do
-      provider.expects(:execute).with { |args| args[3] == "--no-rdoc" }.returns ""
+      provider.expects(:execute).with { |args| args[2] == "--no-rdoc" }.returns ""
       provider.install
     end
 
     it "should specify that RI should not be included" do
-      provider.expects(:execute).with { |args| args[4] == "--no-ri" }.returns ""
+      provider.expects(:execute).with { |args| args[3] == "--no-ri" }.returns ""
       provider.install
     end
 
     it "should specify the package name" do
-      provider.expects(:execute).with { |args| args[5] == "myresource" }.returns ""
+      provider.expects(:execute).with { |args| args[4] == "myresource" }.returns ""
+      provider.install
+    end
+
+    it "should not append install_options by default" do
+      provider.expects(:execute).with { |args| args.length == 5 }.returns ""
+      provider.install
+    end
+
+    it "should allow setting an install_options parameter" do
+      resource[:install_options] = [ '--force', {'--bindir' => '/usr/bin' } ]
+      provider.expects(:execute).with { |args| args[5] == '--force' && args[6] == '--bindir=/usr/bin' }.returns ''
       provider.install
     end
 
@@ -53,14 +63,14 @@ describe provider_class do
       describe "as a normal file" do
         it "should use the file name instead of the gem name" do
           resource[:source] = "/my/file"
-          provider.expects(:execute).with { |args| args[3] == "/my/file" }.returns ""
+          provider.expects(:execute).with { |args| args[2] == "/my/file" }.returns ""
           provider.install
         end
       end
       describe "as a file url" do
         it "should use the file name instead of the gem name" do
           resource[:source] = "file:///my/file"
-          provider.expects(:execute).with { |args| args[3] == "/my/file" }.returns ""
+          provider.expects(:execute).with { |args| args[2] == "/my/file" }.returns ""
           provider.install
         end
       end
@@ -73,7 +83,7 @@ describe provider_class do
       describe "as a non-file and non-puppet url" do
         it "should treat the source as a gem repository" do
           resource[:source] = "http://host/my/file"
-          provider.expects(:execute).with { |args| args[3..5] == ["--source", "http://host/my/file", "myresource"] }.returns ""
+          provider.expects(:execute).with { |args| args[2..4] == ["--source", "http://host/my/file", "myresource"] }.returns ""
           provider.install
         end
       end
@@ -135,6 +145,18 @@ describe provider_class do
       ]
     end
 
+    it "should ignore platform specifications" do
+      provider_class.expects(:execute).with(%w{/my/gem list --local}).returns <<-HEREDOC.gsub(/        /, '')
+        systemu (1.2.0)
+        nokogiri (1.6.1 ruby java x86-mingw32 x86-mswin32-60, 1.4.4.1 x86-mswin32)
+      HEREDOC
+
+      provider_class.instances.map {|p| p.properties}.should == [
+        {:ensure => ["1.2.0"],          :provider => :gem, :name => 'systemu'},
+        {:ensure => ["1.6.1", "1.4.4.1"], :provider => :gem, :name => 'nokogiri'}
+      ]
+    end
+
     it "should not fail when an unmatched line is returned" do
       provider_class.expects(:execute).with(%w{/my/gem list --local}).
         returns(File.read(my_fixture('line-with-1.8.5-warning')))
@@ -150,6 +172,16 @@ describe provider_class do
                    {:provider=>:gem, :ensure=>["2.9.0"], :name=>"rspec-mocks"},
                    {:provider=>:gem, :ensure=>["0.9.0"], :name=>"rubygems-bundler"},
                    {:provider=>:gem, :ensure=>["1.11.3.3"], :name=>"rvm"}]
+    end
+  end
+
+  describe "listing gems" do
+    describe "searching for a single package" do
+      it "searches for an exact match" do
+        provider_class.expects(:execute).with(includes('^bundler$')).returns(File.read(my_fixture('gem-list-single-package')))
+        expected = {:name => 'bundler', :ensure => %w[1.6.2], :provider => :gem}
+        expect(provider_class.gemlist({:justme => 'bundler'})).to eq(expected)
+      end
     end
   end
 end

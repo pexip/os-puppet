@@ -1,25 +1,27 @@
 # Augeas and SELinux requirements may be disabled at build time by passing
 # --without augeas and/or --without selinux to rpmbuild or mock
 
-# Fedora 17 ships with Ruby 1.9, which uses vendorlibdir instead of
-# sitelibdir. Adjust our target if installing on f17.
-%if 0%{?fedora} >= 17
+# Fedora 17 ships with ruby 1.9, RHEL 7 with ruby 2.0, which use vendorlibdir instead
+# of sitelibdir. Adjust our target if installing on f17 or rhel7.
+%if 0%{?fedora} >= 17 || 0%{?rhel} >= 7 || 0%{?amzn} >= 1
 %global puppet_libdir   %(ruby -rrbconfig -e 'puts RbConfig::CONFIG["vendorlibdir"]')
 %else
 %global puppet_libdir   %(ruby -rrbconfig -e 'puts RbConfig::CONFIG["sitelibdir"]')
 %endif
 
-%if 0%{?fedora} >= 17
+%if 0%{?fedora} >= 17 || 0%{?rhel} >= 7
 %global _with_systemd 1
 %else
 %global _with_systemd 0
 %endif
 
 # VERSION is subbed out during rake srpm process
-%global realversion 3.1.1
-%global rpmversion 3.1.1
+%global realversion 3.7.3
+%global rpmversion 3.7.3
 
 %global confdir ext/redhat
+%global pending_upgrade_path %{_localstatedir}/lib/rpm-state/puppet
+%global pending_upgrade_file %{pending_upgrade_path}/upgrade_pending
 
 Name:           puppet
 Version:        %{rpmversion}
@@ -34,24 +36,25 @@ Group:          System Environment/Base
 
 BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 
-BuildRequires:  facter < 1:2.0
+BuildRequires:  facter >= 1:1.7.0
 # Puppet 3.x drops ruby 1.8.5 support and adds ruby 1.9 support
 BuildRequires:  ruby >= 1.8.7
-
+BuildRequires:  hiera >= 1.0.0
 BuildArch:      noarch
-Requires:       ruby(abi) >= 1.8
+Requires:       ruby >= 1.8
 Requires:       ruby-shadow
+Requires:       rubygem-json
 
 # Pull in ruby selinux bindings where available
 %if 0%{?fedora} || 0%{?rhel} >= 6
 %{!?_without_selinux:Requires: ruby(selinux), libselinux-utils}
 %else
-%if 0%{?rhel} && 0%{?rhel} == 5
+%if ( 0%{?rhel} && 0%{?rhel} == 5 ) || 0%{?amzn} >= 1
 %{!?_without_selinux:Requires: libselinux-ruby, libselinux-utils}
 %endif
 %endif
 
-Requires:       facter >= 1.6.11
+Requires:       facter >= 1:1.7.0
 # Puppet 3.x drops ruby 1.8.5 support and adds ruby 1.9 support
 # Ruby 1.8.7 available for el5 at: yum.puppetlabs.com/el/5/devel/$ARCH
 Requires:       ruby >= 1.8.7
@@ -66,6 +69,11 @@ Requires:       shadow-utils
 %if 0%{?_with_systemd}
 # Required for %%post, %%preun, %%postun
 Requires:       systemd
+%if 0%{?fedora} >= 18 || 0%{?rhel} >= 7
+BuildRequires:  systemd
+%else
+BuildRequires:  systemd-units
+%endif
 %else
 # Required for %%post and %%preun
 Requires:       chkconfig
@@ -93,7 +101,6 @@ The server can also function as a certificate authority and file server.
 
 %prep
 %setup -q -n %{name}-%{realversion}
-patch -s -p1 < ext/redhat/rundir-perms.patch
 
 
 %build
@@ -107,18 +114,23 @@ find examples/ -type f | xargs --no-run-if-empty chmod a-x
 rm -rf %{buildroot}
 ruby install.rb --destdir=%{buildroot} --quick --no-rdoc --sitelibdir=%{puppet_libdir}
 
+install -d -m0755 %{buildroot}%{_sysconfdir}/puppet/environments/example_env/manifests
+install -d -m0755 %{buildroot}%{_sysconfdir}/puppet/environments/example_env/modules
 install -d -m0755 %{buildroot}%{_sysconfdir}/puppet/manifests
 install -d -m0755 %{buildroot}%{_datadir}/%{name}/modules
 install -d -m0755 %{buildroot}%{_localstatedir}/lib/puppet
+install -d -m0755 %{buildroot}%{_localstatedir}/lib/puppet/state
+install -d -m0755 %{buildroot}%{_localstatedir}/lib/puppet/reports
 install -d -m0755 %{buildroot}%{_localstatedir}/run/puppet
 
 # As per redhat bz #495096
 install -d -m0750 %{buildroot}%{_localstatedir}/log/puppet
 
 %if 0%{?_with_systemd}
-# Systemd for fedora >= 17
+# Systemd for fedora >= 17 or el 7
 %{__install} -d -m0755  %{buildroot}%{_unitdir}
-install -Dp -m0644 ext/systemd/puppetagent.service %{buildroot}%{_unitdir}/puppetagent.service
+install -Dp -m0644 ext/systemd/puppet.service %{buildroot}%{_unitdir}/puppet.service
+ln -s %{_unitdir}/puppet.service %{buildroot}%{_unitdir}/puppetagent.service
 install -Dp -m0644 ext/systemd/puppetmaster.service %{buildroot}%{_unitdir}/puppetmaster.service
 %else
 # Otherwise init.d for fedora < 17 or el 5, 6
@@ -132,6 +144,7 @@ install -Dp -m0755 %{confdir}/queue.init %{buildroot}%{_initrddir}/puppetqueue
 install -Dp -m0644 %{confdir}/fileserver.conf %{buildroot}%{_sysconfdir}/puppet/fileserver.conf
 install -Dp -m0644 %{confdir}/puppet.conf %{buildroot}%{_sysconfdir}/puppet/puppet.conf
 install -Dp -m0644 %{confdir}/logrotate %{buildroot}%{_sysconfdir}/logrotate.d/puppet
+install -Dp -m0644 ext/README.environment %{buildroot}%{_sysconfdir}/puppet/environments/example_env/README.environment
 
 # Install the ext/ directory to %%{_datadir}/%%{name}
 install -d %{buildroot}%{_datadir}/%{name}
@@ -158,7 +171,7 @@ vimdir=%{buildroot}%{_datadir}/vim/vimfiles
 install -Dp -m0644 ext/vim/ftdetect/puppet.vim $vimdir/ftdetect/puppet.vim
 install -Dp -m0644 ext/vim/syntax/puppet.vim $vimdir/syntax/puppet.vim
 
-%if 0%{?fedora} >= 15
+%if 0%{?fedora} >= 15 || 0%{?rhel} >= 7
 # Setup tmpfiles.d config
 mkdir -p %{buildroot}%{_sysconfdir}/tmpfiles.d
 echo "D /var/run/%{name} 0755 %{name} %{name} -" > \
@@ -168,13 +181,24 @@ echo "D /var/run/%{name} 0755 %{name} %{name} -" > \
 # Create puppet modules directory for puppet module tool
 mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
 
+
+# Install a NetworkManager dispatcher script to pickup changes to
+# # /etc/resolv.conf and such (https://bugzilla.redhat.com/532085).
+mkdir -p %{buildroot}%{_sysconfdir}/NetworkManager/dispatcher.d
+cp -pr ext/puppet-nm-dispatcher \
+  %{buildroot}%{_sysconfdir}/NetworkManager/dispatcher.d/98-%{name}
+
 %files
 %defattr(-, root, root, 0755)
 %doc LICENSE README.md examples
 %{_bindir}/puppet
 %{_bindir}/extlookup2hiera
 %{puppet_libdir}/*
+%dir %{_sysconfdir}/NetworkManager
+%dir %{_sysconfdir}/NetworkManager/dispatcher.d
+%{_sysconfdir}/NetworkManager/dispatcher.d/98-puppet
 %if 0%{?_with_systemd}
+%{_unitdir}/puppet.service
 %{_unitdir}/puppetagent.service
 %else
 %{_initrddir}/puppet
@@ -182,7 +206,7 @@ mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
 %endif
 %dir %{_sysconfdir}/puppet
 %dir %{_sysconfdir}/%{name}/modules
-%if 0%{?fedora} >= 15
+%if 0%{?fedora} >= 15 || 0%{?rhel} >= 7
 %config(noreplace) %{_sysconfdir}/tmpfiles.d/%{name}.conf
 %endif
 %config(noreplace) %{_sysconfdir}/puppet/puppet.conf
@@ -237,6 +261,12 @@ mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
 %defattr(-, puppet, puppet, 0750)
 %{_localstatedir}/log/puppet
 %{_localstatedir}/lib/puppet
+%{_localstatedir}/lib/puppet/state
+%{_localstatedir}/lib/puppet/reports
+# Return the default attributes to 0755 to
+# prevent incorrect permission assignment on EL6
+%defattr(-, root, root, 0755)
+
 
 %files server
 %defattr(-, root, root, 0755)
@@ -249,6 +279,11 @@ mkdir -p %{buildroot}%{_sysconfdir}/%{name}/modules
 %endif
 %config(noreplace) %{_sysconfdir}/puppet/fileserver.conf
 %dir %{_sysconfdir}/puppet/manifests
+%dir %{_sysconfdir}/puppet/environments
+%dir %{_sysconfdir}/puppet/environments/example_env
+%dir %{_sysconfdir}/puppet/environments/example_env/manifests
+%dir %{_sysconfdir}/puppet/environments/example_env/modules
+%{_sysconfdir}/puppet/environments/example_env/README.environment
 %{_mandir}/man8/puppet-ca.8.gz
 %{_mandir}/man8/puppet-master.8.gz
 
@@ -275,7 +310,7 @@ if [ "$1" -ge 1 ]; then
   newpid="%{_localstatedir}/run/puppet/agent.pid"
   if [ -s "$oldpid" -a ! -s "$newpid" ]; then
     (kill $(< "$oldpid") && rm -f "$oldpid" && \
-      /bin/systemctl start puppetagent.service) >/dev/null 2>&1 || :
+      /bin/systemctl start puppet.service) >/dev/null 2>&1 || :
   fi
 fi
 %else
@@ -288,6 +323,15 @@ if [ "$1" -ge 1 ]; then
   if [ -s "$oldpid" -a ! -s "$newpid" ]; then
     (kill $(< "$oldpid") && rm -f "$oldpid" && \
       /sbin/service puppet start) >/dev/null 2>&1 || :
+  fi
+
+  # If an old puppet process (one whose binary is located in /sbin) is running,
+  # kill it and then start up a fresh with the new binary.
+  if [ -e "$newpid" ]; then
+    if ps aux | grep `cat "$newpid"` | grep -v grep | awk '{ print $12 }' | grep -q sbin; then
+      (kill $(< "$newpid") && rm -f "$newpid" && \
+        /sbin/service puppet start) >/dev/null 2>&1 || :
+    fi
   fi
 fi
 %endif
@@ -324,9 +368,28 @@ fi
 if [ "$1" -eq 0 ] ; then
     # Package removal, not upgrade
     /bin/systemctl --no-reload disable puppetagent.service > /dev/null 2>&1 || :
+    /bin/systemctl --no-reload disable puppet.service > /dev/null 2>&1 || :
     /bin/systemctl stop puppetagent.service > /dev/null 2>&1 || :
+    /bin/systemctl stop puppet.service > /dev/null 2>&1 || :
     /bin/systemctl daemon-reload >/dev/null 2>&1 || :
 fi
+
+if [ "$1" == "1" ]; then
+    /bin/systemctl is-enabled puppetagent.service > /dev/null 2>&1
+    if [ "$?" == "0" ]; then
+        /bin/systemctl --no-reload disable puppetagent.service > /dev/null 2>&1 ||:
+        /bin/systemctl stop puppetagent.service > /dev/null 2>&1 ||:
+        /bin/systemctl daemon-reload >/dev/null 2>&1 ||:
+        if [ ! -d %{pending_upgrade_path} ]; then
+            mkdir -p %{pending_upgrade_path}
+        fi
+
+        if [ ! -e %{pending_upgrade_file} ]; then
+            touch %{pending_upgrade_file}
+        fi
+    fi
+fi
+
 %else
 if [ "$1" = 0 ] ; then
     /sbin/service puppet stop > /dev/null 2>&1
@@ -352,6 +415,12 @@ fi
 %postun
 %if 0%{?_with_systemd}
 if [ $1 -ge 1 ] ; then
+    if [ -e %{pending_upgrade_file} ]; then
+        /bin/systemctl --no-reload enable puppet.service > /dev/null 2>&1 ||:
+        /bin/systemctl start puppet.service > /dev/null 2>&1 ||:
+        /bin/systemctl daemon-reload >/dev/null 2>&1 ||:
+        rm %{pending_upgrade_file}
+    fi
     # Package upgrade, not uninstall
     /bin/systemctl try-restart puppetagent.service >/dev/null 2>&1 || :
 fi
@@ -377,14 +446,28 @@ fi
 rm -rf %{buildroot}
 
 %changelog
-* Fri Mar 08 2013 Puppet Labs Release <info@puppetlabs.com> -  3.1.1-1
-- Build for 3.1.1
+* Mon Nov 03 2014 Puppet Labs Release <info@puppetlabs.com> -  3.7.3-1
+- Build for 3.7.3
+
+* Wed Oct 2 2013 Jason Antman <jason@jasonantman.com>
+- Move systemd service and unit file names back to "puppet" from erroneous "puppetagent"
+- Add symlink to puppetagent unit file for compatibility with current bug
+- Alter package removal actions to deactivate and stop both service names
+
+* Thu Jun 27 2013 Matthaus Owens <matthaus@puppetlabs.com> - 3.2.3-0.1rc0
+- Bump requires on ruby-rgen to 0.6.5
+
+* Fri Apr 12 2013 Matthaus Owens <matthaus@puppetlabs.com> - 3.2.0-0.1rc0
+- Add requires on ruby-rgen for new parser in Puppet 3.2
 
 * Fri Jan 25 2013 Matthaus Owens <matthaus@puppetlabs.com> - 3.1.0-0.1rc1
 - Add extlookup2hiera.8.gz to the files list
 
 * Wed Jan 9  2013 Ryan Uber <ru@ryanuber.com> - 3.1.0-0.1rc1
 - Work-around for RH Bugzilla 681540
+
+* Fri Dec 28 2012 Michael Stahnke <stahnma@puppetlabs.com> -  3.0.2-2
+- Added a script for Network Manager for bug https://bugzilla.redhat.com/532085
 
 * Tue Dec 18 2012 Matthaus Owens <matthaus@puppetlabs.com>
 - Remove for loop on examples/ code which no longer exists. Add --no-run-if-empty to xargs invocations.

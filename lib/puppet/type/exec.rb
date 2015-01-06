@@ -3,26 +3,48 @@ module Puppet
     include Puppet::Util::Execution
     require 'timeout'
 
-    @doc = "Executes external commands.  It is critical that all commands
-      executed using this mechanism can be run multiple times without
-      harm, i.e., they are *idempotent*.  One useful way to create idempotent
-      commands is to use the checks like `creates` to avoid running the
-      command unless some condition is met.
+    @doc = "Executes external commands.
 
-      Note that you can restrict an `exec` to only run when it receives
-      events by using the `refreshonly` parameter; this is a useful way to
-      have your configuration respond to events with arbitrary commands.
+      Any command in an `exec` resource **must** be able to run multiple times
+      without causing harm --- that is, it must be *idempotent*. There are three
+      main ways for an exec to be idempotent:
 
-      Note also that if an `exec` receives an event from another resource,
-      it will get executed again (or execute the command specified in `refresh`, if there is one).
+      * The command itself is already idempotent. (For example, `apt-get update`.)
+      * The exec has an `onlyif`, `unless`, or `creates` attribute, which prevents
+        Puppet from running the command unless some condition is met.
+      * The exec has `refreshonly => true`, which only allows Puppet to run the
+        command when some other resource is changed. (See the notes on refreshing
+        below.)
 
-      There is a strong tendency to use `exec` to do whatever work Puppet
-      can't already do; while this is obviously acceptable (and unavoidable)
-      in the short term, it is highly recommended to migrate work from `exec`
-      to native Puppet types as quickly as possible.  If you find that
-      you are doing a lot of work with `exec`, please at least notify
-      us at Puppet Labs what you are doing, and hopefully we can work with
-      you to get a native resource type for the work you are doing.
+      A caution: There's a widespread tendency to use collections of execs to
+      manage resources that aren't covered by an existing resource type. This
+      works fine for simple tasks, but once your exec pile gets complex enough
+      that you really have to think to understand what's happening, you should
+      consider developing a custom resource type instead, as it will be much
+      more predictable and maintainable.
+
+      **Refresh:** `exec` resources can respond to refresh events (via
+      `notify`, `subscribe`, or the `~>` arrow). The refresh behavior of execs
+      is non-standard, and can be affected by the `refresh` and
+      `refreshonly` attributes:
+
+      * If `refreshonly` is set to true, the exec will _only_ run when it receives an
+        event. This is the most reliable way to use refresh with execs.
+      * If the exec already would have run and receives an event, it will run its
+        command **up to two times.** (If an `onlyif`, `unless`, or `creates` condition
+        is no longer met after the first run, the second run will not occur.)
+      * If the exec already would have run, has a `refresh` command, and receives an
+        event, it will run its normal command, then run its `refresh` command
+        (as long as any `onlyif`, `unless`, or `creates` conditions are still met
+        after the normal command finishes).
+      * If the exec would **not** have run (due to an `onlyif`, `unless`, or `creates`
+        attribute) and receives an event, it still will not run.
+      * If the exec has `noop => true`, would otherwise have run, and receives
+        an event from a non-noop resource, it will run once (or run its `refresh`
+        command instead, if it has one).
+
+      In short: If there's a possibility of your exec receiving refresh events,
+      it becomes doubly important to make sure the run conditions are restricted.
 
       **Autorequires:** If Puppet is managing an exec's cwd or the executable
       file used in an exec's command, the exec resource will autorequire those
@@ -55,9 +77,27 @@ module Puppet
       defaultto "0"
 
       attr_reader :output
-      desc "The expected return code(s).  An error will be returned if the
-        executed command returns something else.  Defaults to 0. Can be
-        specified as an array of acceptable return codes or a single value."
+      desc "The expected exit code(s).  An error will be returned if the
+        executed command has some other exit code.  Defaults to 0. Can be
+        specified as an array of acceptable exit codes or a single value.
+
+        On POSIX systems, exit codes are always integers between 0 and 255.
+
+        On Windows, **most** exit codes should be integers between 0
+        and 2147483647.
+
+        Larger exit codes on Windows can behave inconsistently across different
+        tools. The Win32 APIs define exit codes as 32-bit unsigned integers, but
+        both the cmd.exe shell and the .NET runtime cast them to signed
+        integers. This means some tools will report negative numbers for exit
+        codes above 2147483647. (For example, cmd.exe reports 4294967295 as -1.)
+        Since Puppet uses the plain Win32 APIs, it will report the very large
+        number instead of the negative number, which might not be what you
+        expect if you got the exit code from a cmd.exe session.
+
+        Microsoft recommends against using negative/very large exit codes, and
+        you should avoid them when possible. To convert a negative exit code to
+        the positive one Puppet will use, add it to 4294967296."
 
       # Make output a bit prettier
       def change_to_s(currentvalue, newvalue)
@@ -79,11 +119,6 @@ module Puppet
 
       # Actually execute the command.
       def sync
-        olddir = nil
-
-        # We need a dir to change to, even if it's just the cwd
-        dir = self.resource[:cwd] || Dir.pwd
-
         event = :executed_command
         tries = self.resource[:tries]
         try_sleep = self.resource[:try_sleep]
@@ -100,7 +135,7 @@ module Puppet
             end
           end
         rescue Timeout::Error
-          self.fail "Command exceeded timeout" % value.inspect
+          self.fail Puppet::Error, "Command exceeded timeout", $!
         end
 
         if log = @resource[:logoutput]
@@ -137,6 +172,10 @@ module Puppet
         normal log level (usually `notice`), but if the command fails
         (meaning its return code does not match the specified code) then
         any output is logged at the `err` log level."
+
+      validate do |command|
+        raise ArgumentError, "Command must be a String, got value of class #{command.class}" unless command.is_a? String
+      end
     end
 
     newparam(:path) do
@@ -157,12 +196,17 @@ module Puppet
         use this then any error output is not currently captured.  This
         is because of a bug within Ruby.  If you are using Puppet to
         create this user, the exec will automatically require the user,
-        as long as it is specified by name."
+        as long as it is specified by name.
 
-      # Most validation is handled by the SUIDManager class.
+        Please note that the $HOME environment variable is not automatically set
+        when using this attribute."
+
       validate do |user|
-        self.fail "Only root can execute commands as other users" unless Puppet.features.root?
-        self.fail "Unable to execute commands as other users on Windows" if Puppet.features.microsoft_windows?
+        if Puppet.features.microsoft_windows?
+          self.fail "Unable to execute commands as other users on Windows"
+        elsif !Puppet.features.root? && resource.current_username() != user
+          self.fail "Only root can execute commands as other users"
+        end
       end
     end
 
@@ -180,9 +224,11 @@ module Puppet
     end
 
     newparam(:logoutput) do
-      desc "Whether to log output.  Defaults to `on_failure`, which only logs
-        the output when the command has a non-zero exit code.  In addition to
-        the values below, you may set this attribute to any legal log level."
+      desc "Whether to log command output in addition to logging the
+        exit code.  Defaults to `on_failure`, which only logs the output
+        when the command has an exit code that does not match any value
+        specified by the `returns` attribute. As with any resource type,
+        the log level can be controlled with the `loglevel` metaparameter."
 
       defaultto :on_failure
 
@@ -216,6 +262,18 @@ module Puppet
       end
     end
 
+    newparam(:umask, :required_feature => :umask) do
+      desc "Sets the umask to be used while executing this command"
+
+      munge do |value|
+        if value =~ /^0?[0-7]{1,4}$/
+          return value.to_i(8)
+        else
+          raise Puppet::Error, "The umask specification is invalid: #{value.inspect}"
+        end
+      end
+    end
+
     newparam(:timeout) do
       desc "The maximum time the command should take.  If the command takes
         longer than the timeout, the command is considered to have failed
@@ -226,8 +284,8 @@ module Puppet
         value = value.shift if value.is_a?(Array)
         begin
           value = Float(value)
-        rescue ArgumentError => e
-          raise ArgumentError, "The timeout must be a number."
+        rescue ArgumentError
+          raise ArgumentError, "The timeout must be a number.", $!.backtrace
         end
         [value, 0.0].max
       end
@@ -337,14 +395,14 @@ module Puppet
       # If the file exists, return false (i.e., don't run the command),
       # else return true
       def check(value)
-        ! FileTest.exists?(value)
+        ! Puppet::FileSystem.exist?(value)
       end
     end
 
     newcheck(:unless) do
       desc <<-'EOT'
         If this parameter is set, then this `exec` will run unless
-        the command returns 0.  For example:
+        the command has an exit code of 0.  For example:
 
             exec { "/bin/echo root >> /usr/lib/cron/cron.allow":
               path   => "/usr/bin:/usr/sbin:/bin",
@@ -356,6 +414,8 @@ module Puppet
 
         Note that this command follows the same rules as the main command,
         which is to say that it must be fully qualified if the path is not set.
+        It also uses the same provider as the main command, so any behavior
+        that differs by provider will match.
       EOT
 
       validate do |cmds|
@@ -386,7 +446,7 @@ module Puppet
     newcheck(:onlyif) do
       desc <<-'EOT'
         If this parameter is set, then this `exec` will only run if
-        the command returns 0.  For example:
+        the command has an exit code of 0.  For example:
 
             exec { "logrotate":
               path   => "/usr/bin:/usr/sbin:/bin",
@@ -397,6 +457,8 @@ module Puppet
 
         Note that this command follows the same rules as the main command,
         which is to say that it must be fully qualified if the path is not set.
+        It also uses the same provider as the main command, so any behavior
+        that differs by provider will match.
 
         Also note that onlyif can take an array as its value, e.g.:
 
@@ -521,6 +583,10 @@ module Puppet
           self.property(:returns).sync
         end
       end
+    end
+
+    def current_username
+      Etc.getpwuid(Process.uid).name
     end
   end
 end

@@ -23,12 +23,12 @@ Puppet.features.add(:rails) do
 
     require 'active_record'
     require 'active_record/version'
-  rescue LoadError => detail
-    if FileTest.exists?("/usr/share/rails")
+  rescue LoadError
+    if Puppet::FileSystem.exist?("/usr/share/rails")
       count = 0
       Dir.entries("/usr/share/rails").each do |dir|
         libdir = File.join("/usr/share/rails", dir, "lib")
-        if FileTest.exists?(libdir) and ! $LOAD_PATH.include?(libdir)
+        if Puppet::FileSystem.exist?(libdir) and ! $LOAD_PATH.include?(libdir)
           count += 1
           $LOAD_PATH << libdir
         end

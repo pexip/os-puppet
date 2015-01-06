@@ -10,7 +10,7 @@ if Puppet.features.microsoft_windows?
   end
 end
 
-describe Puppet::Type.type(:file) do
+describe Puppet::Type.type(:file), :uses_checksums => true do
   include PuppetSpec::Files
 
   let(:catalog) { Puppet::Resource::Catalog.new }
@@ -21,21 +21,28 @@ describe Puppet::Type.type(:file) do
     File.join(parent, 'file_testing')
   end
 
+  let(:dir) do
+    # we create a directory first so backups of :path that are stored in
+    # the same directory will also be removed after the tests
+    parent = tmpdir('file_spec')
+    File.join(parent, 'dir_testing')
+  end
+
   if Puppet.features.posix?
     def set_mode(mode, file)
       File.chmod(mode, file)
     end
 
     def get_mode(file)
-      File.lstat(file).mode
+      Puppet::FileSystem.lstat(file).mode
     end
 
     def get_owner(file)
-      File.lstat(file).uid
+      Puppet::FileSystem.lstat(file).uid
     end
 
     def get_group(file)
-      File.lstat(file).gid
+      Puppet::FileSystem.lstat(file).gid
     end
   else
     class SecurityHelper
@@ -57,6 +64,16 @@ describe Puppet::Type.type(:file) do
     def get_group(file)
       SecurityHelper.get_group(file)
     end
+
+    def get_aces_for_path_by_sid(path, sid)
+      SecurityHelper.get_aces_for_path_by_sid(path, sid)
+    end
+  end
+
+  around :each do |example|
+    Puppet.override(:environments => Puppet::Environments::Static.new) do
+      example.run
+    end
   end
 
   before do
@@ -67,12 +84,12 @@ describe Puppet::Type.type(:file) do
   it "should not attempt to manage files that do not exist if no means of creating the file is specified" do
     source = tmpfile('source')
 
-    catalog.add_resource described_class.new :path => source, :mode => 0755
+    catalog.add_resource described_class.new :path => source, :mode => '0755'
 
     status = catalog.apply.report.resource_statuses["File[#{source}]"]
     status.should_not be_failed
     status.should_not be_changed
-    File.should_not be_exist(source)
+    Puppet::FileSystem.exist?(source).should be_false
   end
 
   describe "when ensure is absent" do
@@ -81,14 +98,14 @@ describe Puppet::Type.type(:file) do
       catalog.add_resource(described_class.new(:path => path, :ensure => :absent, :backup => :false))
       report = catalog.apply.report
       report.resource_statuses["File[#{path}]"].should_not be_failed
-      File.should_not be_exist(path)
+      Puppet::FileSystem.exist?(path).should be_false
     end
 
     it "should do nothing if file is not present" do
       catalog.add_resource(described_class.new(:path => path, :ensure => :absent, :backup => :false))
       report = catalog.apply.report
       report.resource_statuses["File[#{path}]"].should_not be_failed
-      File.should_not be_exist(path)
+      Puppet::FileSystem.exist?(path).should be_false
     end
 
     # issue #14599
@@ -144,7 +161,7 @@ describe Puppet::Type.type(:file) do
         it "should set executable bits for existing readable directories" do
           set_mode(0600, target)
 
-          catalog.add_resource described_class.new(:path => target, :ensure => :directory, :mode => 0644)
+          catalog.add_resource described_class.new(:path => target, :ensure => :directory, :mode => '0644')
           catalog.apply
 
           (get_mode(target) & 07777).should == 0755
@@ -204,7 +221,7 @@ describe Puppet::Type.type(:file) do
         end
       end
 
-      describe "for links", :unless => Puppet.features.microsoft_windows? do
+      describe "for links", :if => described_class.defaultprovider.feature?(:manages_symlinks) do
         let(:link) { tmpfile('link_mode') }
 
         describe "when managing links" do
@@ -214,7 +231,7 @@ describe Puppet::Type.type(:file) do
             FileUtils.touch(link_target)
             File.chmod(0444, link_target)
 
-            File.symlink(link_target, link)
+            Puppet::FileSystem.symlink(link_target, link)
           end
 
           it "should not set the executable bit on the link nor the target" do
@@ -222,8 +239,8 @@ describe Puppet::Type.type(:file) do
 
             catalog.apply
 
-            (File.stat(link).mode & 07777) == 0666
-            (File.lstat(link_target).mode & 07777) == 0444
+            (Puppet::FileSystem.stat(link).mode & 07777) == 0666
+            (Puppet::FileSystem.lstat(link_target).mode & 07777) == 0444
           end
 
           it "should ignore dangling symlinks (#6856)" do
@@ -232,7 +249,7 @@ describe Puppet::Type.type(:file) do
             catalog.add_resource described_class.new(:path => link, :ensure => :link, :mode => 0666, :target => link_target, :links => :manage)
             catalog.apply
 
-            File.should_not be_exist(link)
+            Puppet::FileSystem.exist?(link).should be_false
           end
 
           it "should create a link to the target if ensure is omitted" do
@@ -240,9 +257,9 @@ describe Puppet::Type.type(:file) do
             catalog.add_resource described_class.new(:path => link, :target => link_target)
             catalog.apply
 
-            File.should be_exist link
-            File.lstat(link).ftype.should == 'link'
-            File.readlink(link).should == link_target
+            Puppet::FileSystem.exist?(link).should be_true
+            Puppet::FileSystem.lstat(link).ftype.should == 'link'
+            Puppet::FileSystem.readlink(link).should == link_target
           end
         end
 
@@ -251,7 +268,7 @@ describe Puppet::Type.type(:file) do
             target = tmpfile('dangling')
 
             FileUtils.touch(target)
-            File.symlink(target, link)
+            Puppet::FileSystem.symlink(target, link)
             File.delete(target)
 
             catalog.add_resource described_class.new(:path => path, :source => link, :mode => 0600, :links => :follow)
@@ -264,7 +281,7 @@ describe Puppet::Type.type(:file) do
             before :each do
               File.chmod(0600, link_target)
 
-              File.symlink(link_target, link)
+              Puppet::FileSystem.symlink(link_target, link)
             end
 
             after :each do
@@ -273,22 +290,20 @@ describe Puppet::Type.type(:file) do
 
             describe "that is readable" do
               it "should set the executable bits when creating the destination (#10315)" do
-                pending "bug #10315"
-
                 catalog.add_resource described_class.new(:path => path, :source => link, :mode => 0666, :links => :follow)
                 catalog.apply
 
+                File.should be_directory(path)
                 (get_mode(path) & 07777).should == 0777
               end
 
               it "should set the executable bits when overwriting the destination (#10315)" do
-                pending "bug #10315"
-
                 FileUtils.touch(path)
 
-                catalog.add_resource described_class.new(:path => path, :source => link, :mode => 0666, :links => :follow)
+                catalog.add_resource described_class.new(:path => path, :source => link, :mode => 0666, :links => :follow, :backup => false)
                 catalog.apply
 
+                File.should be_directory(path)
                 (get_mode(path) & 07777).should == 0777
               end
             end
@@ -303,37 +318,41 @@ describe Puppet::Type.type(:file) do
                 set_mode(0700, link_target)
               end
 
-              it "should not set executable bits when creating the destination (#10315)" do
-                pending "bug #10315"
-
+              it "should set executable bits when creating the destination (#10315)" do
                 catalog.add_resource described_class.new(:path => path, :source => link, :mode => 0666, :links => :follow)
                 catalog.apply
 
-                (get_mode(path) & 07777).should == 0666
+                File.should be_directory(path)
+                (get_mode(path) & 07777).should == 0777
               end
 
-              it "should not set executable bits when overwriting the destination" do
+              it "should set executable bits when overwriting the destination" do
                 FileUtils.touch(path)
 
-                catalog.add_resource described_class.new(:path => path, :source => link, :mode => 0666, :links => :follow)
+                catalog.add_resource described_class.new(:path => path, :source => link, :mode => 0666, :links => :follow, :backup => false)
                 catalog.apply
 
-                (get_mode(path) & 07777).should == 0666
+                File.should be_directory(path)
+                (get_mode(path) & 07777).should == 0777
               end
             end
           end
 
           describe "to a file" do
-            let(:target) { tmpfile('file_target') }
+            let(:link_target) { tmpfile('file_target') }
+
+            before :each do
+              FileUtils.touch(link_target)
+
+              Puppet::FileSystem.symlink(link_target, link)
+            end
 
             it "should create the file, not a symlink (#2817, #10315)" do
-              pending "bug #2817, #10315"
-
               catalog.add_resource described_class.new(:path => path, :source => link, :mode => 0600, :links => :follow)
               catalog.apply
 
               File.should be_file(path)
-              (get_mode(path) & 07777) == 0600
+              (get_mode(path) & 07777).should == 0600
             end
 
             it "should overwrite the file" do
@@ -343,7 +362,7 @@ describe Puppet::Type.type(:file) do
               catalog.apply
 
               File.should be_file(path)
-              (get_mode(path) & 07777) == 0600
+              (get_mode(path) & 07777).should == 0600
             end
           end
 
@@ -355,8 +374,8 @@ describe Puppet::Type.type(:file) do
               File.chmod(0666, real_target)
 
               # link -> target -> real_target
-              File.symlink(real_target, target)
-              File.symlink(target, link)
+              Puppet::FileSystem.symlink(real_target, target)
+              Puppet::FileSystem.symlink(target, link)
             end
 
             after :each do
@@ -365,13 +384,11 @@ describe Puppet::Type.type(:file) do
 
             describe "when following all links" do
               it "should create the destination and apply executable bits (#10315)" do
-                pending "bug #10315"
-
                 catalog.add_resource described_class.new(:path => path, :source => link, :mode => 0600, :links => :follow)
                 catalog.apply
 
                 File.should be_directory(path)
-                (get_mode(path) & 07777) == 0777
+                (get_mode(path) & 07777).should == 0700
               end
 
               it "should overwrite the destination and apply executable bits" do
@@ -381,7 +398,7 @@ describe Puppet::Type.type(:file) do
                 catalog.apply
 
                 File.should be_directory(path)
-                (get_mode(path) & 07777) == 0777
+                (get_mode(path) & 0111).should == 0100
               end
             end
           end
@@ -391,123 +408,111 @@ describe Puppet::Type.type(:file) do
   end
 
   describe "when writing files" do
-    it "should backup files to a filebucket when one is configured" do
-      filebucket = Puppet::Type.type(:filebucket).new :path => tmpfile("filebucket"), :name => "mybucket"
-      file = described_class.new :path => path, :backup => "mybucket", :content => "foo"
-      catalog.add_resource file
-      catalog.add_resource filebucket
+    with_digest_algorithms do
+      it "should backup files to a filebucket when one is configured" do
+        filebucket = Puppet::Type.type(:filebucket).new :path => tmpfile("filebucket"), :name => "mybucket"
+        file = described_class.new :path => path, :backup => "mybucket", :content => "foo"
+        catalog.add_resource file
+        catalog.add_resource filebucket
 
-      File.open(file[:path], "wb") { |f| f.puts "bar" }
+        File.open(file[:path], "w") { |f| f.write("bar") }
 
-      md5 = Digest::MD5.hexdigest(IO.binread(file[:path]))
+        d = digest(IO.binread(file[:path]))
 
-      catalog.apply
+        catalog.apply
 
-      filebucket.bucket.getfile(md5).should == "bar\n"
-    end
+        filebucket.bucket.getfile(d).should == "bar"
+      end
 
-    it "should backup files in the local directory when a backup string is provided" do
-      file = described_class.new :path => path, :backup => ".bak", :content => "foo"
-      catalog.add_resource file
+      it "should backup files in the local directory when a backup string is provided" do
+        file = described_class.new :path => path, :backup => ".bak", :content => "foo"
+        catalog.add_resource file
 
-      File.open(file[:path], "w") { |f| f.puts "bar" }
+        File.open(file[:path], "w") { |f| f.puts "bar" }
 
-      catalog.apply
+        catalog.apply
 
-      backup = file[:path] + ".bak"
-      FileTest.should be_exist(backup)
-      File.read(backup).should == "bar\n"
-    end
+        backup = file[:path] + ".bak"
+        Puppet::FileSystem.exist?(backup).should be_true
+        File.read(backup).should == "bar\n"
+      end
 
-    it "should fail if no backup can be performed" do
-      dir = tmpdir("backups")
+      it "should fail if no backup can be performed" do
+        dir = tmpdir("backups")
 
-      file = described_class.new :path => File.join(dir, "testfile"), :backup => ".bak", :content => "foo"
-      catalog.add_resource file
+        file = described_class.new :path => File.join(dir, "testfile"), :backup => ".bak", :content => "foo"
+        catalog.add_resource file
 
-      File.open(file[:path], 'w') { |f| f.puts "bar" }
+        File.open(file[:path], 'w') { |f| f.puts "bar" }
 
-      # Create a directory where the backup should be so that writing to it fails
-      Dir.mkdir(File.join(dir, "testfile.bak"))
+        # Create a directory where the backup should be so that writing to it fails
+        Dir.mkdir(File.join(dir, "testfile.bak"))
 
-      Puppet::Util::Log.stubs(:newmessage)
+        Puppet::Util::Log.stubs(:newmessage)
 
-      catalog.apply
+        catalog.apply
 
-      File.read(file[:path]).should == "bar\n"
-    end
+        File.read(file[:path]).should == "bar\n"
+      end
 
-    it "should not backup symlinks", :unless => Puppet.features.microsoft_windows? do
-      link = tmpfile("link")
-      dest1 = tmpfile("dest1")
-      dest2 = tmpfile("dest2")
-      bucket = Puppet::Type.type(:filebucket).new :path => tmpfile("filebucket"), :name => "mybucket"
-      file = described_class.new :path => link, :target => dest2, :ensure => :link, :backup => "mybucket"
-      catalog.add_resource file
-      catalog.add_resource bucket
+      it "should not backup symlinks", :if => described_class.defaultprovider.feature?(:manages_symlinks) do
+        link = tmpfile("link")
+        dest1 = tmpfile("dest1")
+        dest2 = tmpfile("dest2")
+        bucket = Puppet::Type.type(:filebucket).new :path => tmpfile("filebucket"), :name => "mybucket"
+        file = described_class.new :path => link, :target => dest2, :ensure => :link, :backup => "mybucket"
+        catalog.add_resource file
+        catalog.add_resource bucket
 
-      File.open(dest1, "w") { |f| f.puts "whatever" }
-      File.symlink(dest1, link)
+        File.open(dest1, "w") { |f| f.puts "whatever" }
+        Puppet::FileSystem.symlink(dest1, link)
 
-      md5 = Digest::MD5.hexdigest(File.read(file[:path]))
+        d = digest(File.read(file[:path]))
 
-      catalog.apply
+        catalog.apply
 
-      File.readlink(link).should == dest2
-      Find.find(bucket[:path]) { |f| File.file?(f) }.should be_nil
-    end
+        Puppet::FileSystem.readlink(link).should == dest2
+        Puppet::FileSystem.exist?(bucket[:path]).should be_false
+      end
 
-    it "should backup directories to the local filesystem by copying the whole directory" do
-      file = described_class.new :path => path, :backup => ".bak", :content => "foo", :force => true
-      catalog.add_resource file
+      it "should backup directories to the local filesystem by copying the whole directory" do
+        file = described_class.new :path => path, :backup => ".bak", :content => "foo", :force => true
+        catalog.add_resource file
 
-      Dir.mkdir(path)
+        Dir.mkdir(path)
 
-      otherfile = File.join(path, "foo")
-      File.open(otherfile, "w") { |f| f.print "yay" }
+        otherfile = File.join(path, "foo")
+        File.open(otherfile, "w") { |f| f.print "yay" }
 
-      catalog.apply
+        catalog.apply
 
-      backup = "#{path}.bak"
-      FileTest.should be_directory(backup)
+        backup = "#{path}.bak"
+        FileTest.should be_directory(backup)
 
-      File.read(File.join(backup, "foo")).should == "yay"
-    end
+        File.read(File.join(backup, "foo")).should == "yay"
+      end
 
-    it "should backup directories to filebuckets by backing up each file separately" do
-      bucket = Puppet::Type.type(:filebucket).new :path => tmpfile("filebucket"), :name => "mybucket"
-      file = described_class.new :path => tmpfile("bucket_backs"), :backup => "mybucket", :content => "foo", :force => true
-      catalog.add_resource file
-      catalog.add_resource bucket
+      it "should backup directories to filebuckets by backing up each file separately" do
+        bucket = Puppet::Type.type(:filebucket).new :path => tmpfile("filebucket"), :name => "mybucket"
+        file = described_class.new :path => tmpfile("bucket_backs"), :backup => "mybucket", :content => "foo", :force => true
+        catalog.add_resource file
+        catalog.add_resource bucket
 
-      Dir.mkdir(file[:path])
-      foofile = File.join(file[:path], "foo")
-      barfile = File.join(file[:path], "bar")
-      File.open(foofile, "w") { |f| f.print "fooyay" }
-      File.open(barfile, "w") { |f| f.print "baryay" }
+        Dir.mkdir(file[:path])
+        foofile = File.join(file[:path], "foo")
+        barfile = File.join(file[:path], "bar")
+        File.open(foofile, "w") { |f| f.print "fooyay" }
+        File.open(barfile, "w") { |f| f.print "baryay" }
 
 
-      foomd5 = Digest::MD5.hexdigest(File.read(foofile))
-      barmd5 = Digest::MD5.hexdigest(File.read(barfile))
+        food = digest(File.read(foofile))
+        bard = digest(File.read(barfile))
 
-      catalog.apply
+        catalog.apply
 
-      bucket.bucket.getfile(foomd5).should == "fooyay"
-      bucket.bucket.getfile(barmd5).should == "baryay"
-    end
-
-    it "should propagate failures encountered when renaming the temporary file" do
-      file = described_class.new :path => path, :content => "foo"
-      file.stubs(:perform_backup).returns(true)
-
-      catalog.add_resource file
-
-      File.open(path, "w") { |f| f.print "bar" }
-
-      File.expects(:rename).raises ArgumentError
-
-      expect { file.write(:content) }.to raise_error(Puppet::Error, /Could not rename temporary file/)
-      File.read(path).should == "bar"
+        bucket.bucket.getfile(food).should == "fooyay"
+        bucket.bucket.getfile(bard).should == "baryay"
+      end
     end
   end
 
@@ -574,7 +579,7 @@ describe Puppet::Type.type(:file) do
       end
     end
 
-    it "should be able to recursively make links to other files", :unless => Puppet.features.microsoft_windows? do
+    it "should be able to recursively make links to other files", :if => described_class.defaultprovider.feature?(:manages_symlinks) do
       source = tmpfile("file_link_integration_source")
 
       build_path(source)
@@ -590,13 +595,13 @@ describe Puppet::Type.type(:file) do
       @dirs.each do |path|
         link_path = path.sub(source, dest)
 
-        File.lstat(link_path).should be_directory
+        Puppet::FileSystem.lstat(link_path).should be_directory
       end
 
       @files.each do |path|
         link_path = path.sub(source, dest)
 
-        File.lstat(link_path).ftype.should == "link"
+        Puppet::FileSystem.lstat(link_path).ftype.should == "link"
       end
     end
 
@@ -616,13 +621,13 @@ describe Puppet::Type.type(:file) do
       @dirs.each do |path|
         newpath = path.sub(source, dest)
 
-        File.lstat(newpath).should be_directory
+        Puppet::FileSystem.lstat(newpath).should be_directory
       end
 
       @files.each do |path|
         newpath = path.sub(source, dest)
 
-        File.lstat(newpath).ftype.should == "file"
+        Puppet::FileSystem.lstat(newpath).ftype.should == "file"
       end
     end
 
@@ -685,8 +690,8 @@ describe Puppet::Type.type(:file) do
             catalog.apply
 
             File.should be_directory(path)
-            File.should_not be_exist(File.join(path, 'one'))
-            File.should be_exist(File.join(path, 'three', 'four'))
+            Puppet::FileSystem.exist?(File.join(path, 'one')).should be_false
+            Puppet::FileSystem.exist?(File.join(path, 'three', 'four')).should be_true
           end
 
           it "should recursively copy an empty directory" do
@@ -707,7 +712,7 @@ describe Puppet::Type.type(:file) do
             catalog.apply
 
             File.should be_directory(path)
-            File.should_not be_exist(File.join(path, 'a'))
+            Puppet::FileSystem.exist?(File.join(path, 'a')).should be_false
           end
 
           it "should only recurse one level" do
@@ -731,9 +736,9 @@ describe Puppet::Type.type(:file) do
 
             catalog.apply
 
-            File.should be_exist(File.join(path, 'a'))
-            File.should_not be_exist(File.join(path, 'a', 'b'))
-            File.should_not be_exist(File.join(path, 'z'))
+            Puppet::FileSystem.exist?(File.join(path, 'a')).should be_true
+            Puppet::FileSystem.exist?(File.join(path, 'a', 'b')).should be_false
+            Puppet::FileSystem.exist?(File.join(path, 'z')).should be_false
           end
         end
 
@@ -830,10 +835,10 @@ describe Puppet::Type.type(:file) do
             catalog.add_resource obj
             catalog.apply
 
-            File.should be_exist(File.join(path, 'a'))
-            File.should_not be_exist(File.join(path, 'a', 'b'))
-            File.should be_exist(File.join(path, 'z'))
-            File.should_not be_exist(File.join(path, 'z', 'y'))
+            Puppet::FileSystem.exist?(File.join(path, 'a')).should be_true
+            Puppet::FileSystem.exist?(File.join(path, 'a', 'b')).should be_false
+            Puppet::FileSystem.exist?(File.join(path, 'z')).should be_true
+            Puppet::FileSystem.exist?(File.join(path, 'z', 'y')).should be_false
           end
         end
       end
@@ -889,15 +894,16 @@ describe Puppet::Type.type(:file) do
     it "should be able to copy files with spaces in their names" do
       dest = tmpfile("destwith spaces")
       source = tmpfile_with_contents("filewith spaces", "foo")
-      File.chmod(0755, source)
+
+      expected_mode = 0755
+      Puppet::FileSystem.chmod(expected_mode, source)
 
       catalog.add_resource described_class.new(:path => dest, :source => source)
 
       catalog.apply
 
-      expected_mode = Puppet.features.microsoft_windows? ? 0644 : 0755
       File.read(dest).should == "foo"
-      (File.stat(dest).mode & 007777).should == expected_mode
+      (Puppet::FileSystem.stat(dest).mode & 007777).should == expected_mode
     end
 
     it "should be able to copy individual files even if recurse has been specified" do
@@ -949,7 +955,7 @@ describe Puppet::Type.type(:file) do
     catalog.add_resource file
     catalog.apply
 
-    File.should_not be_exist(dest)
+    Puppet::FileSystem.exist?(dest).should be_false
   end
 
   describe "when sourcing" do
@@ -991,7 +997,40 @@ describe Puppet::Type.type(:file) do
     end
 
     describe "on Windows systems", :if => Puppet.features.microsoft_windows? do
+      def expects_sid_granted_full_access_explicitly(path, sid)
+        inherited_ace = Puppet::Util::Windows::AccessControlEntry::INHERITED_ACE
+
+        aces = get_aces_for_path_by_sid(path, sid)
+        aces.should_not be_empty
+
+        aces.each do |ace|
+          ace.mask.should == Puppet::Util::Windows::File::FILE_ALL_ACCESS
+          (ace.flags & inherited_ace).should_not == inherited_ace
+        end
+      end
+
+      def expects_system_granted_full_access_explicitly(path)
+        expects_sid_granted_full_access_explicitly(path, @sids[:system])
+      end
+
+      def expects_at_least_one_inherited_ace_grants_full_access(path, sid)
+        inherited_ace = Puppet::Util::Windows::AccessControlEntry::INHERITED_ACE
+
+        aces = get_aces_for_path_by_sid(path, sid)
+        aces.should_not be_empty
+
+        aces.any? do |ace|
+          ace.mask == Puppet::Util::Windows::File::FILE_ALL_ACCESS &&
+            (ace.flags & inherited_ace) == inherited_ace
+        end.should be_true
+      end
+
+      def expects_at_least_one_inherited_system_ace_grants_full_access(path)
+        expects_at_least_one_inherited_ace_grants_full_access(path, @sids[:system])
+      end
+
       it "should provide valid default values when ACLs are not supported" do
+        Puppet::Util::Windows::Security.stubs(:supports_acl?).returns(false)
         Puppet::Util::Windows::Security.stubs(:supports_acl?).with(source).returns false
 
         file = described_class.new(
@@ -1004,9 +1043,250 @@ describe Puppet::Type.type(:file) do
         catalog.add_resource file
         catalog.apply
 
-        get_owner(path).should == 'S-1-5-32-544'
-        get_group(path).should == 'S-1-0-0'
+        get_owner(path).should =~ /^S\-1\-5\-.*$/
+        get_group(path).should =~ /^S\-1\-0\-0.*$/
         get_mode(path).should == 0644
+      end
+
+      describe "when processing SYSTEM ACEs" do
+        before do
+          @sids = {
+            :current_user => Puppet::Util::Windows::SID.name_to_sid(Puppet::Util::Windows::ADSI::User.current_user_name),
+            :system => Win32::Security::SID::LocalSystem,
+            :admin => Puppet::Util::Windows::SID.name_to_sid("Administrator"),
+            :guest => Puppet::Util::Windows::SID.name_to_sid("Guest"),
+            :users => Win32::Security::SID::BuiltinUsers,
+            :power_users => Win32::Security::SID::PowerUsers,
+            :none => Win32::Security::SID::Nobody
+          }
+        end
+
+        describe "on files" do
+          before :each do
+            @file = described_class.new(
+              :path   => path,
+              :ensure => :file,
+              :source => source,
+              :backup => false
+            )
+            catalog.add_resource @file
+          end
+
+          describe "when source permissions are ignored" do
+            before :each do
+              @file[:source_permissions] = :ignore
+            end
+
+            it "preserves the inherited SYSTEM ACE" do
+              catalog.apply
+
+              expects_at_least_one_inherited_system_ace_grants_full_access(path)
+            end
+          end
+
+          describe "when permissions are insync?" do
+            it "preserves the explicit SYSTEM ACE" do
+              FileUtils.touch(path)
+
+              sd = Puppet::Util::Windows::Security.get_security_descriptor(path)
+              sd.protect = true
+              sd.owner = @sids[:none]
+              sd.group = @sids[:none]
+              Puppet::Util::Windows::Security.set_security_descriptor(source, sd)
+              Puppet::Util::Windows::Security.set_security_descriptor(path, sd)
+
+              catalog.apply
+
+              expects_system_granted_full_access_explicitly(path)
+            end
+          end
+
+          describe "when permissions are not insync?" do
+            before :each do
+              @file[:owner] = 'None'
+              @file[:group] = 'None'
+            end
+
+            it "replaces inherited SYSTEM ACEs with an uninherited one for an existing file" do
+              FileUtils.touch(path)
+
+              expects_at_least_one_inherited_system_ace_grants_full_access(path)
+
+              catalog.apply
+
+              expects_system_granted_full_access_explicitly(path)
+            end
+
+            it "replaces inherited SYSTEM ACEs for a new file with an uninherited one" do
+              catalog.apply
+
+              expects_system_granted_full_access_explicitly(path)
+            end
+          end
+
+          describe "created with SYSTEM as the group" do
+            before :each do
+              @file[:owner] = @sids[:users]
+              @file[:group] = @sids[:system]
+              @file[:mode] = 0644
+
+              catalog.apply
+            end
+
+            it "should allow the user to explicitly set the mode to 4" do
+              system_aces = get_aces_for_path_by_sid(path, @sids[:system])
+              system_aces.should_not be_empty
+
+              system_aces.each do |ace|
+                ace.mask.should == Puppet::Util::Windows::File::FILE_GENERIC_READ
+              end
+            end
+
+            it "prepends SYSTEM ace when changing group from system to power users" do
+              @file[:group] = @sids[:power_users]
+              catalog.apply
+
+              system_aces = get_aces_for_path_by_sid(path, @sids[:system])
+              system_aces.size.should == 1
+            end
+          end
+
+          describe "with :links set to :follow" do
+            it "should not fail to apply" do
+              # at minimal, we need an owner and/or group
+              @file[:owner] = @sids[:users]
+              @file[:links] = :follow
+
+              catalog.apply do |transaction|
+                if transaction.any_failed?
+                  pretty_transaction_error(transaction)
+                end
+              end
+            end
+          end
+        end
+
+        describe "on directories" do
+          before :each do
+            @directory = described_class.new(
+              :path   => dir,
+              :ensure => :directory
+            )
+            catalog.add_resource @directory
+          end
+
+          def grant_everyone_full_access(path)
+            sd = Puppet::Util::Windows::Security.get_security_descriptor(path)
+            sd.dacl.allow(
+              'S-1-1-0', #everyone
+              Puppet::Util::Windows::File::FILE_ALL_ACCESS,
+              Puppet::Util::Windows::AccessControlEntry::OBJECT_INHERIT_ACE |
+              Puppet::Util::Windows::AccessControlEntry::CONTAINER_INHERIT_ACE)
+            Puppet::Util::Windows::Security.set_security_descriptor(path, sd)
+          end
+
+          after :each do
+            grant_everyone_full_access(dir)
+          end
+
+          describe "when source permissions are ignored" do
+            before :each do
+              @directory[:source_permissions] = :ignore
+            end
+
+            it "preserves the inherited SYSTEM ACE" do
+              catalog.apply
+
+              expects_at_least_one_inherited_system_ace_grants_full_access(dir)
+            end
+          end
+
+          describe "when permissions are insync?" do
+            it "preserves the explicit SYSTEM ACE" do
+              Dir.mkdir(dir)
+
+              source_dir = tmpdir('source_dir')
+              @directory[:source] = source_dir
+
+              sd = Puppet::Util::Windows::Security.get_security_descriptor(source_dir)
+              sd.protect = true
+              sd.owner = @sids[:none]
+              sd.group = @sids[:none]
+              Puppet::Util::Windows::Security.set_security_descriptor(source_dir, sd)
+              Puppet::Util::Windows::Security.set_security_descriptor(dir, sd)
+
+              catalog.apply
+
+              expects_system_granted_full_access_explicitly(dir)
+            end
+          end
+
+          describe "when permissions are not insync?" do
+            before :each do
+              @directory[:owner] = 'None'
+              @directory[:group] = 'None'
+              @directory[:mode] = 0444
+            end
+
+            it "replaces inherited SYSTEM ACEs with an uninherited one for an existing directory" do
+              FileUtils.mkdir(dir)
+
+              expects_at_least_one_inherited_system_ace_grants_full_access(dir)
+
+              catalog.apply
+
+              expects_system_granted_full_access_explicitly(dir)
+            end
+
+            it "replaces inherited SYSTEM ACEs with an uninherited one for an existing directory" do
+              catalog.apply
+
+              expects_system_granted_full_access_explicitly(dir)
+            end
+
+            describe "created with SYSTEM as the group" do
+              before :each do
+                @directory[:owner] = @sids[:users]
+                @directory[:group] = @sids[:system]
+                @directory[:mode] = 0644
+
+                catalog.apply
+              end
+
+              it "should allow the user to explicitly set the mode to 4" do
+                system_aces = get_aces_for_path_by_sid(dir, @sids[:system])
+                system_aces.should_not be_empty
+
+                system_aces.each do |ace|
+                  # unlike files, Puppet sets execute bit on directories that are readable
+                  ace.mask.should == Puppet::Util::Windows::File::FILE_GENERIC_READ | Puppet::Util::Windows::File::FILE_GENERIC_EXECUTE
+                end
+              end
+
+              it "prepends SYSTEM ace when changing group from system to power users" do
+                @directory[:group] = @sids[:power_users]
+                catalog.apply
+
+                system_aces = get_aces_for_path_by_sid(dir, @sids[:system])
+                system_aces.size.should == 1
+              end
+            end
+
+            describe "with :links set to :follow" do
+              it "should not fail to apply" do
+                # at minimal, we need an owner and/or group
+                @directory[:owner] = @sids[:users]
+                @directory[:links] = :follow
+
+                catalog.apply do |transaction|
+                  if transaction.any_failed?
+                    pretty_transaction_error(transaction)
+                  end
+                end
+              end
+            end
+          end
+        end
       end
     end
   end
@@ -1056,7 +1336,25 @@ describe Puppet::Type.type(:file) do
     end
 
     it "should purge files that are neither remote nor otherwise managed" do
-      FileTest.should_not be_exist(@purgee)
+      Puppet::FileSystem.exist?(@purgee).should be_false
+    end
+  end
+
+  describe "when using validate_cmd" do
+    it "should fail the file resource if command fails" do
+      catalog.add_resource(described_class.new(:path => path, :content => "foo", :validate_cmd => "/usr/bin/env false"))
+      Puppet::Util::Execution.expects(:execute).with("/usr/bin/env false", {:combine => true, :failonfail => true}).raises(Puppet::ExecutionFailure, "Failed")
+      report = catalog.apply.report
+      report.resource_statuses["File[#{path}]"].should be_failed
+      Puppet::FileSystem.exist?(path).should be_false
+    end
+
+    it "should succeed the file resource if command succeeds" do
+      catalog.add_resource(described_class.new(:path => path, :content => "foo", :validate_cmd => "/usr/bin/env true"))
+      Puppet::Util::Execution.expects(:execute).with("/usr/bin/env true", {:combine => true, :failonfail => true}).returns ''
+      report = catalog.apply.report
+      report.resource_statuses["File[#{path}]"].should_not be_failed
+      Puppet::FileSystem.exist?(path).should be_true
     end
   end
 
@@ -1070,5 +1368,17 @@ describe Puppet::Type.type(:file) do
     full_name = File.join(dir, name)
     File.open(full_name, "w") { |f| f.write contents }
     full_name
+  end
+
+  def pretty_transaction_error(transaction)
+    report = transaction.report
+    status_failures = report.resource_statuses.values.select { |r| r.failed? }
+    status_fail_msg = status_failures.
+      collect(&:events).
+      flatten.
+      select { |event| event.status == 'failure' }.
+      collect { |event| "#{event.resource}: #{event.message}" }.join("; ")
+
+    raise "Got #{status_failures.length} failure(s) while applying: #{status_fail_msg}"
   end
 end

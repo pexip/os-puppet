@@ -8,49 +8,61 @@ require 'puppet/ssl/certificate_revocation_list'
 require 'puppet/ssl/configuration'
 
 class Puppet::Network::HTTP::WEBrick
+  CIPHERS = "EDH+CAMELLIA:EDH+aRSA:EECDH+aRSA+AESGCM:EECDH+aRSA+SHA384:EECDH+aRSA+SHA256:EECDH:+CAMELLIA256:+AES256:+CAMELLIA128:+AES128:+SSLv3:!aNULL:!eNULL:!LOW:!3DES:!MD5:!EXP:!PSK:!DSS:!RC4:!SEED:!IDEA:!ECDSA:kEDH:CAMELLIA256-SHA:AES256-SHA:CAMELLIA128-SHA:AES128-SHA"
+
   def initialize
     @listening = false
-    @mutex = Mutex.new
   end
 
   def listen(address, port)
-    arguments = {:BindAddress => address, :Port => port}
-    arguments.merge!(setup_logger)
-    arguments.merge!(setup_ssl)
+    @server = create_server(address, port)
 
-    @server = WEBrick::HTTPServer.new(arguments)
     @server.listeners.each { |l| l.start_immediately = false }
 
-    @server.mount('/', Puppet::Network::HTTP::WEBrickREST, :this_value_is_apparently_necessary_but_unused)
+    @server.mount('/', Puppet::Network::HTTP::WEBrickREST)
 
-    @mutex.synchronize do
-      raise "WEBrick server is already listening" if @listening
-      @listening = true
-      @thread = Thread.new {
-        @server.start { |sock|
-          raise "Client disconnected before connection could be established" unless IO.select([sock],nil,nil,6.2)
-          sock.accept
-          @server.run(sock)
-        }
-      }
-      sleep 0.1 until @server.status == :Running
+    raise "WEBrick server is already listening" if @listening
+    @listening = true
+    @thread = Thread.new do
+      @server.start do |sock|
+        timeout = 10.0
+        if ! IO.select([sock],nil,nil,timeout)
+          raise "Client did not send data within %.1f seconds of connecting" % timeout
+        end
+        sock.accept
+        @server.run(sock)
+      end
     end
+    sleep 0.1 until @server.status == :Running
   end
 
   def unlisten
-    @mutex.synchronize do
-      raise "WEBrick server is not listening" unless @listening
-      @server.shutdown
-      @thread.join
-      @server = nil
-      @listening = false
-    end
+    raise "WEBrick server is not listening" unless @listening
+    @server.shutdown
+    wait_for_shutdown
+    @server = nil
+    @listening = false
   end
 
   def listening?
-    @mutex.synchronize do
-      @listening
-    end
+    @listening
+  end
+
+  def wait_for_shutdown
+    @thread.join
+  end
+
+  # @api private
+  def create_server(address, port)
+    arguments = {:BindAddress => address, :Port => port, :DoNotReverseLookup => true}
+    arguments.merge!(setup_logger)
+    arguments.merge!(setup_ssl)
+
+    BasicSocket.do_not_reverse_lookup = true
+
+    server = WEBrick::HTTPServer.new(arguments)
+    server.ssl_context.ciphers = CIPHERS
+    server
   end
 
   # Configure our http log file.
@@ -94,7 +106,7 @@ class Puppet::Network::HTTP::WEBrick
     results[:SSLCertificate] = host.certificate.content
     results[:SSLStartImmediately] = true
     results[:SSLEnable] = true
-    results[:SSLOptions] = OpenSSL::SSL::OP_NO_SSLv2
+    results[:SSLOptions] = OpenSSL::SSL::OP_NO_SSLv2 | OpenSSL::SSL::OP_NO_SSLv3
 
     raise Puppet::Error, "Could not find CA certificate" unless Puppet::SSL::Certificate.indirection.find(Puppet::SSL::CA_NAME)
 

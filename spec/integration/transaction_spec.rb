@@ -33,7 +33,7 @@ describe Puppet::Transaction do
 
     resource.expects(:eval_generate).returns([child_resource])
 
-    transaction = Puppet::Transaction.new(catalog)
+    transaction = Puppet::Transaction.new(catalog, nil, Puppet::Graph::RandomPrioritizer.new)
 
     resource.expects(:retrieve).raises "this is a failure"
     resource.stubs(:err)
@@ -49,7 +49,7 @@ describe Puppet::Transaction do
     resource.virtual = true
     catalog.add_resource resource
 
-    transaction = Puppet::Transaction.new(catalog)
+    transaction = Puppet::Transaction.new(catalog, nil, Puppet::Graph::RandomPrioritizer.new)
 
     resource.expects(:evaluate).never
 
@@ -64,7 +64,7 @@ describe Puppet::Transaction do
     catalog.add_resource resource
 
     catalog.apply
-    FileTest.should be_exist(path)
+    Puppet::FileSystem.exist?(path).should be_true
   end
 
   it "should not apply virtual exported resources" do
@@ -74,7 +74,7 @@ describe Puppet::Transaction do
     resource.virtual = true
     catalog.add_resource resource
 
-    transaction = Puppet::Transaction.new(catalog)
+    transaction = Puppet::Transaction.new(catalog, nil, Puppet::Graph::RandomPrioritizer.new)
 
     resource.expects(:evaluate).never
 
@@ -86,7 +86,7 @@ describe Puppet::Transaction do
     resource = Puppet::Type.type(:interface).new :name => "FastEthernet 0/1"
     catalog.add_resource resource
 
-    transaction = Puppet::Transaction.new(catalog)
+    transaction = Puppet::Transaction.new(catalog, nil, Puppet::Graph::RandomPrioritizer.new)
     transaction.for_network_device = false
 
     transaction.expects(:apply).never.with(resource, nil)
@@ -100,7 +100,7 @@ describe Puppet::Transaction do
     resource = Puppet::Type.type(:file).new :path => make_absolute("/foo/bar"), :backup => false
     catalog.add_resource resource
 
-    transaction = Puppet::Transaction.new(catalog)
+    transaction = Puppet::Transaction.new(catalog, nil, Puppet::Graph::RandomPrioritizer.new)
     transaction.for_network_device = true
 
     transaction.expects(:apply).never.with(resource, nil)
@@ -114,7 +114,7 @@ describe Puppet::Transaction do
     resource = Puppet::Type.type(:interface).new :name => "FastEthernet 0/1"
     catalog.add_resource resource
 
-    transaction = Puppet::Transaction.new(catalog)
+    transaction = Puppet::Transaction.new(catalog, nil, Puppet::Graph::RandomPrioritizer.new)
     transaction.for_network_device = true
 
     transaction.expects(:apply).with(resource, nil)
@@ -128,7 +128,7 @@ describe Puppet::Transaction do
     resource = Puppet::Type.type(:schedule).new :name => "test"
     catalog.add_resource resource
 
-    transaction = Puppet::Transaction.new(catalog)
+    transaction = Puppet::Transaction.new(catalog, nil, Puppet::Graph::RandomPrioritizer.new)
     transaction.for_network_device = true
 
     transaction.expects(:apply).with(resource, nil)
@@ -189,8 +189,24 @@ describe Puppet::Transaction do
 
     catalog = mk_catalog(file, exec1, exec2)
     catalog.apply
-    FileTest.should be_exist(file1)
-    FileTest.should be_exist(file2)
+    Puppet::FileSystem.exist?(file1).should be_true
+    Puppet::FileSystem.exist?(file2).should be_true
+  end
+
+  it "should apply no resources whatsoever if a pre_run_check fails" do
+    path = tmpfile("path")
+    file = Puppet::Type.type(:file).new(
+      :path => path,
+      :ensure => "file"
+    )
+    notify = Puppet::Type.type(:notify).new(
+      :title => "foo"
+    )
+    notify.expects(:pre_run_check).raises(Puppet::Error, "fail for testing")
+
+    catalog = mk_catalog(file, notify)
+    catalog.apply
+    Puppet::FileSystem.exist?(path).should_not be_true
   end
 
   it "should not let one failed refresh result in other refreshes failing" do
@@ -223,7 +239,7 @@ describe Puppet::Transaction do
 
     catalog = mk_catalog(file, exec1, exec2)
     catalog.apply
-    FileTest.should be_exists(newfile)
+    Puppet::FileSystem.exist?(newfile).should be_true
   end
 
   it "should still trigger skipped resources" do
@@ -251,18 +267,18 @@ describe Puppet::Transaction do
 
     # Run it once
     catalog.apply
-    FileTest.should be_exists(fname)
+    Puppet::FileSystem.exist?(fname).should be_true
 
     # Now remove it, so it can get created again
-    File.unlink(fname)
+    Puppet::FileSystem.unlink(fname)
 
     file[:content] = "some content"
 
     catalog.apply
-    FileTest.should be_exists(fname)
+    Puppet::FileSystem.exist?(fname).should be_true
 
     # Now remove it, so it can get created again
-    File.unlink(fname)
+    Puppet::FileSystem.unlink(fname)
 
     # And tag our exec
     exec.tag("testrun")
@@ -275,7 +291,7 @@ describe Puppet::Transaction do
     file[:content] = "totally different content"
 
     catalog.apply
-    FileTest.should be_exists(fname)
+    Puppet::FileSystem.exist?(fname).should be_true
   end
 
   it "should not attempt to evaluate resources with failed dependencies" do
@@ -302,8 +318,8 @@ describe Puppet::Transaction do
     catalog = mk_catalog(exec, file1, file2)
     catalog.apply
 
-    FileTest.should_not be_exists(file1[:path])
-    FileTest.should_not be_exists(file2[:path])
+    Puppet::FileSystem.exist?(file1[:path]).should be_false
+    Puppet::FileSystem.exist?(file2[:path]).should be_false
   end
 
   it "should not trigger subscribing resources on failure" do
@@ -328,8 +344,8 @@ describe Puppet::Transaction do
     catalog = mk_catalog(exec, create_file1, create_file2)
     catalog.apply
 
-    FileTest.should_not be_exists(file1)
-    FileTest.should_not be_exists(file2)
+    Puppet::FileSystem.exist?(file1).should be_false
+    Puppet::FileSystem.exist?(file2).should be_false
   end
 
   # #801 -- resources only checked in noop should be rescheduled immediately.
@@ -341,6 +357,6 @@ describe Puppet::Transaction do
 
     trans = catalog.apply
 
-    trans.resource_harness.should be_scheduled(trans.resource_status(resource), resource)
+    trans.resource_harness.should be_scheduled(resource)
   end
 end
