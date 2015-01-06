@@ -7,7 +7,7 @@ require 'puppet/parameter/value_collection'
 #
 class Puppet::Parameter::Value
   attr_reader :name, :options, :event
-  attr_accessor :block, :call, :method, :required_features
+  attr_accessor :block, :call, :method, :required_features, :invalidate_refreshes
 
   # Adds an alias for this value.
   # Makes the given _name_ be an alias for this acceptable value.
@@ -34,7 +34,7 @@ class Puppet::Parameter::Value
 
   # Initializes the instance with a literal accepted value, or a regular expression.
   # If anything else is passed, it is turned into a String, and then made into a Symbol.
-  # @param [Symbol, Regexp, Object] the value to accept, Symbol, a regular expression, or object to convert.
+  # @param name [Symbol, Regexp, Object] the value to accept, Symbol, a regular expression, or object to convert.
   # @api private
   #
   def initialize(name)

@@ -1,4 +1,5 @@
 require 'puppet/indirector/terminus'
+require 'hiera/scope'
 
 class Puppet::Indirector::Hiera < Puppet::Indirector::Terminus
   def initialize(*args)
@@ -8,8 +9,16 @@ class Puppet::Indirector::Hiera < Puppet::Indirector::Terminus
     super
   end
 
+  if defined?(::Psych::SyntaxError)
+    DataBindingExceptions = [::StandardError, ::Psych::SyntaxError]
+  else
+    DataBindingExceptions = [::StandardError]
+  end
+
   def find(request)
-    hiera.lookup(request.key, nil, request.options[:variables], nil, nil)
+    hiera.lookup(request.key, nil, Hiera::Scope.new(request.options[:variables]), nil, nil)
+  rescue *DataBindingExceptions => detail
+    raise Puppet::DataBinding::LookupError.new(detail.message, detail)
   end
 
   private
@@ -18,7 +27,7 @@ class Puppet::Indirector::Hiera < Puppet::Indirector::Terminus
     hiera_config = Puppet.settings[:hiera_config]
     config = {}
 
-    if File.exist?(hiera_config)
+    if Puppet::FileSystem.exist?(hiera_config)
       config = Hiera::Config.load(hiera_config)
     else
       Puppet.warning "Config file #{hiera_config} not found, using Hiera defaults"

@@ -8,6 +8,8 @@ describe Puppet::Type.type(:exec) do
     Puppet.features.stubs(:root?).returns(true)
 
     output = rest.delete(:output) || ''
+
+    output = Puppet::Util::Execution::ProcessOutput.new(output, exitstatus)
     tries  = rest[:tries] || 1
 
     args = {
@@ -21,14 +23,12 @@ describe Puppet::Type.type(:exec) do
     exec = Puppet::Type.type(:exec).new(args)
 
     status = stub "process", :exitstatus => exitstatus
-    Puppet::Util::SUIDManager.expects(:run_and_capture).times(tries).
+    Puppet::Util::Execution.expects(:execute).times(tries).
       with() { |*args|
         args[0] == command &&
-        args[1] == nil &&
-        args[2] == nil &&
-        args[3][:override_locale] == false &&
-        args[3].has_key?(:custom_environment)
-      } .returns([output, status])
+        args[1][:override_locale] == false &&
+        args[1].has_key?(:custom_environment)
+      }.returns(output)
 
     return exec
   end
@@ -42,8 +42,9 @@ describe Puppet::Type.type(:exec) do
   describe "when not stubbing the provider" do
     before do
       path = tmpdir('path')
-      true_cmd = File.join(path, 'true')
-      false_cmd = File.join(path, 'false')
+      ext = Puppet.features.microsoft_windows? ? '.exe' : ''
+      true_cmd = File.join(path, "true#{ext}")
+      false_cmd = File.join(path, "false#{ext}")
 
       FileUtils.touch(true_cmd)
       FileUtils.touch(false_cmd)
@@ -60,7 +61,7 @@ describe Puppet::Type.type(:exec) do
     end
 
     describe "when execing" do
-      it "should use the 'run_and_capture' method to exec" do
+      it "should use the 'execute' method to exec" do
         exec_tester("true").refresh.should == :executed_command
       end
 
@@ -153,11 +154,13 @@ describe Puppet::Type.type(:exec) do
     foo = make_absolute('/bin/foo')
     catalog = Puppet::Resource::Catalog.new
     tmp = Puppet::Type.type(:file).new(:name => foo)
-    catalog.add_resource tmp
     execer = Puppet::Type.type(:exec).new(:name => foo)
-    catalog.add_resource execer
 
-    catalog.relationship_graph.dependencies(execer).should == [tmp]
+    catalog.add_resource tmp
+    catalog.add_resource execer
+    dependencies = execer.autorequire(catalog)
+
+    dependencies.collect(&:to_s).should == [Puppet::Relationship.new(tmp, execer).to_s]
   end
 
   describe "when handling the path parameter" do
@@ -199,6 +202,15 @@ describe Puppet::Type.type(:exec) do
         expect {
           Puppet::Type.type(:exec).new(:name => '/bin/true whatever', :user => 'input')
         }.to raise_error Puppet::Error, /Parameter user failed/
+      end
+
+      it "accepts the current user" do
+        Puppet.features.stubs(:root?).returns(false)
+        Etc.stubs(:getpwuid).returns(Struct::Passwd.new('input'))
+
+        type = Puppet::Type.type(:exec).new(:name => '/bin/true whatever', :user => 'input')
+
+        expect(type[:user]).to eq('input')
       end
 
       ['one', 2, 'root', 4294967295, 4294967296].each do |value|
@@ -315,6 +327,17 @@ describe Puppet::Type.type(:exec) do
         @test[param] = input
         @test[param].should == input
       end
+    end
+  end
+
+  describe "when setting command" do
+    subject { described_class.new(:name => @command) }
+    it "fails when passed an Array" do
+      expect { subject[:command] = [] }.to raise_error Puppet::Error, /Command must be a String/
+    end
+
+    it "fails when passed a Hash" do
+      expect { subject[:command] = {} }.to raise_error Puppet::Error, /Command must be a String/
     end
   end
 
@@ -737,6 +760,13 @@ describe Puppet::Type.type(:exec) do
 
     it "should accept an absolute command with a path" do
       type.new(:command => abs, :path => path).must be
+    end
+  end
+  describe "when providing a umask" do
+    it "should fail if an invalid umask is used" do
+      resource = Puppet::Type.type(:exec).new :command => @command
+      expect { resource[:umask] = '0028'}.to raise_error(Puppet::ResourceError, /umask specification is invalid/)
+      expect { resource[:umask] = '28' }.to raise_error(Puppet::ResourceError, /umask specification is invalid/)
     end
   end
 end

@@ -1,6 +1,6 @@
-set name=pkg.fmri value=pkg://puppetlabs.com/system/management/puppet@3.1.1,12.0.0-0
+set name=pkg.fmri value=pkg://puppetlabs.com/system/management/@3.7.3,13.4.0-0
 set name=pkg.summary value="Puppet, an automated configuration management tool"
-set name=pkg.human-version value="3.1.1"
+set name=pkg.human-version value="3.7.3"
 set name=pkg.description value="Puppet, an automated configuration management tool"
 set name=info.classification value="org.opensolaris.category.2008:System/Administration and Configuration"
 set name=org.opensolaris.consolidation value="puppet"

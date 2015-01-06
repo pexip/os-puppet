@@ -94,6 +94,24 @@ describe Array do
       [1,2,3].drop(3).should == []
     end
   end
+
+  describe "#respond_to?" do
+    it "should return true for a standard method (each)" do
+      [].respond_to?(:each).should be_true
+    end
+
+    it "should return false for to_hash" do
+      [].respond_to?(:to_hash).should be_false
+    end
+
+    it "should accept one argument" do
+      lambda { [].respond_to?(:each) }.should_not raise_error
+    end
+
+    it "should accept two arguments" do
+      lambda { [].respond_to?(:each, false) }.should_not raise_error
+    end
+  end
 end
 
 describe IO do
@@ -242,35 +260,81 @@ describe Range do
   end
 end
 
-
-describe Object, "#instance_variables" do
-  it "should work with no instance variables" do
-    Object.new.instance_variables.should == []
-  end
-
-  it "should return symbols, not strings" do
-    o = Object.new
-    ["@foo", "@bar", "@baz"].map {|x| o.instance_variable_set(x, x) }
-    o.instance_variables.should =~ [:@foo, :@bar, :@baz]
-  end
-end
-
 describe OpenSSL::SSL::SSLContext do
   it 'disables SSLv2 via the SSLContext#options bitmask' do
     (subject.options & OpenSSL::SSL::OP_NO_SSLv2).should == OpenSSL::SSL::OP_NO_SSLv2
   end
+
+  it 'disables SSLv3 via the SSLContext#options bitmask' do
+    (subject.options & OpenSSL::SSL::OP_NO_SSLv3).should == OpenSSL::SSL::OP_NO_SSLv3
+  end
+
   it 'explicitly disable SSLv2 ciphers using the ! prefix so they cannot be re-added' do
     cipher_str = OpenSSL::SSL::SSLContext::DEFAULT_PARAMS[:ciphers]
     cipher_str.split(':').should include('!SSLv2')
   end
+
+  it 'does not exclude SSLv3 ciphers shared with TLSv1' do
+    cipher_str = OpenSSL::SSL::SSLContext::DEFAULT_PARAMS[:ciphers]
+    cipher_str.split(':').should_not include('!SSLv3')
+  end
+
   it 'sets parameters on initialization' do
     described_class.any_instance.expects(:set_params)
     subject
   end
+
   it 'has no ciphers with version SSLv2 enabled' do
     ciphers = subject.ciphers.select do |name, version, bits, alg_bits|
       /SSLv2/.match(version)
     end
     ciphers.should be_empty
+  end
+end
+
+
+describe OpenSSL::X509::Store, :if => Puppet::Util::Platform.windows? do
+  let(:store) { described_class.new }
+  let(:cert)  { OpenSSL::X509::Certificate.new(File.read(my_fixture('x509.pem'))) }
+
+  def with_root_certs(certs)
+    Puppet::Util::Windows::RootCerts.expects(:instance).returns(certs)
+  end
+
+  it "adds a root cert to the store" do
+    with_root_certs([cert])
+
+    store.set_default_paths
+  end
+
+  it "ignores duplicate root certs" do
+    with_root_certs([cert, cert])
+
+    store.expects(:add_cert).with(cert).once
+
+    store.set_default_paths
+  end
+
+  it "warns when adding a certificate that already exists" do
+    with_root_certs([cert])
+    store.add_cert(cert)
+
+    store.expects(:warn).with('Failed to add /DC=com/DC=microsoft/CN=Microsoft Root Certificate Authority')
+
+    store.set_default_paths
+  end
+
+  it "raises when adding an invalid certificate" do
+    with_root_certs(['notacert'])
+
+    expect {
+      store.set_default_paths
+    }.to raise_error(TypeError)
+  end
+end
+
+describe SecureRandom do
+  it 'generates a properly formatted uuid' do
+    SecureRandom.uuid.should =~ /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
   end
 end

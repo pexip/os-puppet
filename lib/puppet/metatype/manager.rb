@@ -34,7 +34,7 @@ module Manager
     end
   end
 
-  # Loads all types.  
+  # Loads all types.
   # @note Should only be used for purposes such as generating documentation as this is potentially a very
   #  expensive operation.
   # @return [void]
@@ -49,9 +49,8 @@ module Manager
   # method is kept).
   #
   # @param name [String] the name of the type to create or redefine.
-  # @param options [Hash] options passed on to {Puppet::Util::ClassGen#genclass} as the option `:attributes` after
-  #   first having removed any present `:parent` option.
-  # @option options [Puppet::Type] :parent the parent (super type) of this type. If nil, the default is
+  # @param options [Hash] options passed on to {Puppet::Util::ClassGen#genclass} as the option `:attributes`.
+  # @option options [Puppet::Type]
   #   Puppet::Type. This option is not passed on as an attribute to genclass.
   # @yield [ ] a block evaluated in the context of the created class, thus allowing further detailing of
   #   that class.
@@ -64,7 +63,6 @@ module Manager
     # Handle backward compatibility
     unless options.is_a?(Hash)
       Puppet.warning "Puppet::Type.newtype(#{name}) now expects a hash as the second argument, not #{options.inspect}"
-      options = {:parent => options}
     end
 
     # First make sure we don't have a method sitting around
@@ -85,7 +83,9 @@ module Manager
 
     options = symbolize_options(options)
 
-    if parent = options[:parent]
+
+    if options.include?(:parent) 
+      Puppet.deprecation_warning "option :parent is deprecated. It has no effect"
       options.delete(:parent)
     end
 
@@ -93,7 +93,7 @@ module Manager
 
     klass = genclass(
       name,
-      :parent => (parent || Puppet::Type),
+      :parent => Puppet::Type,
       :overwrite => true,
       :hash => @types,
       :attributes => options,
@@ -131,7 +131,7 @@ module Manager
   def rmtype(name)
     # Then create the class.
 
-    klass = rmclass(name, :hash => @types)
+    rmclass(name, :hash => @types)
 
     singleton_class.send(:remove_method, "new#{name}") if respond_to?("new#{name}")
   end
@@ -142,10 +142,15 @@ module Manager
   # @return [Puppet::Type, nil] the type or nil if the type was not defined and could not be loaded
   #
   def type(name)
+    # Avoid loading if name obviously is not a type name
+    if name.to_s.include?(':')
+      return nil
+    end
+
     @types ||= {}
 
     # We are overwhelmingly symbols here, which usually match, so it is worth
-    # having this special-case to return quickly.  Like, 25K to 300 symbols to
+    # having this special-case to return quickly.  Like, 25K symbols vs. 300
     # strings in this method. --daniel 2012-07-17
     return @types[name] if @types[name]
 
@@ -154,9 +159,8 @@ module Manager
       name = name.downcase.intern
       return @types[name] if @types[name]
     end
-
     # Try loading the type.
-    if typeloader.load(name, Puppet::Node::Environment.current)
+    if typeloader.load(name, Puppet.lookup(:current_environment))
       Puppet.warning "Loaded puppet/type/#{name} but no class was created" unless @types.include? name
     end
 

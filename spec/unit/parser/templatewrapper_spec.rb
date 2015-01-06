@@ -70,6 +70,12 @@ describe Puppet::Parser::TemplateWrapper do
     tw.tags.should == ["tag1","tag2"]
   end
 
+  it "warns about deprecated access to in-scope variables via method calls" do
+    Puppet.expects(:deprecation_warning).with("Variable access via 'in_scope_variable' is deprecated. Use '@in_scope_variable' instead. template[inline]:1")
+    scope["in_scope_variable"] = "is good"
+    tw.result("<%= in_scope_variable %>")
+  end
+
   it "provides access to in-scope variables via method calls" do
     scope["in_scope_variable"] = "is good"
     tw.result("<%= in_scope_variable %>").should == "is good"
@@ -91,11 +97,6 @@ describe Puppet::Parser::TemplateWrapper do
   it "provides access to in-scope variables via instance variables" do
     scope["one"] = "foo"
     tw.result("<%= @one %>").should == "foo"
-  end
-
-  it "should not error out if one of the variables is a symbol" do
-    scope.expects(:to_hash).returns(:_timestamp => "1234")
-    tw.result("<%= @_timestamp %>").should == "1234"
   end
 
   %w{! . ; :}.each do |badchar|

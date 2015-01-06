@@ -61,12 +61,13 @@ module PSON
       #   defiance of RFC 4627 to be parsed by the Parser. This option defaults
       #   to false.
       # * *create_additions*: If set to false, the Parser doesn't create
-      #   additions even if a matchin class and create_id was found. This option
+      #   additions even if a matching class and create_id was found. This option
       #   defaults to true.
       # * *object_class*: Defaults to Hash
       # * *array_class*: Defaults to Array
       def initialize(source, opts = {})
-        super
+        source = convert_encoding source
+        super source
         if !opts.key?(:max_nesting) # defaults to 19
           @max_nesting = 19
         elsif opts[:max_nesting]
@@ -111,6 +112,59 @@ module PSON
 
       private
 
+      def convert_encoding(source)
+        if source.respond_to?(:to_str)
+          source = source.to_str
+        else
+          raise TypeError, "#{source.inspect} is not like a string"
+        end
+        if supports_encodings?(source)
+          if source.encoding == ::Encoding::ASCII_8BIT
+            b = source[0, 4].bytes.to_a
+            source =
+              case
+              when b.size >= 4 && b[0] == 0 && b[1] == 0 && b[2] == 0
+                source.dup.force_encoding(::Encoding::UTF_32BE).encode!(::Encoding::UTF_8)
+              when b.size >= 4 && b[0] == 0 && b[2] == 0
+                source.dup.force_encoding(::Encoding::UTF_16BE).encode!(::Encoding::UTF_8)
+              when b.size >= 4 && b[1] == 0 && b[2] == 0 && b[3] == 0
+                source.dup.force_encoding(::Encoding::UTF_32LE).encode!(::Encoding::UTF_8)
+              when b.size >= 4 && b[1] == 0 && b[3] == 0
+                source.dup.force_encoding(::Encoding::UTF_16LE).encode!(::Encoding::UTF_8)
+              else
+                source.dup
+              end
+          else
+            source = source.encode(::Encoding::UTF_8)
+          end
+          source.force_encoding(::Encoding::ASCII_8BIT)
+        else
+          b = source
+          source =
+            case
+            when b.size >= 4 && b[0] == 0 && b[1] == 0 && b[2] == 0
+              PSON.encode('utf-8', 'utf-32be', b)
+            when b.size >= 4 && b[0] == 0 && b[2] == 0
+              PSON.encode('utf-8', 'utf-16be', b)
+            when b.size >= 4 && b[1] == 0 && b[2] == 0 && b[3] == 0
+              PSON.encode('utf-8', 'utf-32le', b)
+            when b.size >= 4 && b[1] == 0 && b[3] == 0
+              PSON.encode('utf-8', 'utf-16le', b)
+            else
+              b
+            end
+        end
+        source
+      end
+
+      def supports_encodings?(string)
+        # Some modules, such as REXML on 1.8.7 (see #22804) can actually create
+        # a top-level Encoding constant when they are misused. Therefore
+        # checking for just that constant is not enough, so we'll be a bit more
+        # robust about if we can actually support encoding transformations.
+        string.respond_to?(:encoding) && defined?(::Encoding)
+      end
+
       # Unescape characters in strings.
       UNESCAPE_MAP = Hash.new { |h, k| h[k] = k.chr }
 
@@ -150,7 +204,7 @@ module PSON
           UNPARSED
         end
       rescue => e
-        raise GeneratorError, "Caught #{e.class}: #{e}"
+        raise GeneratorError, "Caught #{e.class}: #{e}", e.backtrace
       end
 
       def parse_value

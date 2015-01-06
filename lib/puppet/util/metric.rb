@@ -1,13 +1,38 @@
 # included so we can test object types
 require 'puppet'
+require 'puppet/network/format_support'
 
 # A class for handling metrics.  This is currently ridiculously hackish.
 class Puppet::Util::Metric
+  include Puppet::Network::FormatSupport
 
   attr_accessor :type, :name, :value, :label
   attr_writer :values
 
   attr_writer :basedir
+
+  def self.from_data_hash(data)
+    metric = new(data['name'], data['label'])
+    metric.values = data['values']
+    metric
+  end
+
+  def self.from_pson(data)
+    Puppet.deprecation_warning("from_pson is being removed in favour of from_data_hash.")
+    self.from_data_hash(data)
+  end
+
+  def to_data_hash
+    {
+      'name' => @name,
+      'label' => @label,
+      'values' => @values
+    }
+  end
+
+  def to_pson(*args)
+    to_data_hash.to_pson(*args)
+  end
 
   # Return a specific value
   def [](name)
@@ -51,7 +76,7 @@ class Puppet::Util::Metric
         RRD.create( self.path, '-s', Puppet[:rrdinterval].to_s, '-b', start.to_i.to_s, *args)
       end
     rescue => detail
-      raise "Could not create RRD file #{path}: #{detail}"
+      raise detail, "Could not create RRD file #{path}: #{detail}", detail.backtrace
     end
   end
 
@@ -79,7 +104,6 @@ class Puppet::Util::Metric
       args.push("--title",self.label)
       args.push("--imgformat","PNG")
       args.push("--interlace")
-      i = 0
       defs = []
       lines = []
       #p @values.collect { |s,l| s }
@@ -142,7 +166,7 @@ class Puppet::Util::Metric
       Puppet.warning "RRD library is missing; cannot store metrics"
       return
     end
-    self.create(time - 5) unless FileTest.exists?(self.path)
+    self.create(time - 5) unless Puppet::FileSystem.exist?(self.path)
 
     if Puppet.features.rrd_legacy? && ! Puppet.features.rrd?
       @rrd ||= RRDtool.new(self.path)
@@ -166,7 +190,7 @@ class Puppet::Util::Metric
       end
       #system("rrdtool updatev #{self.path} '#{arg}'")
     rescue => detail
-      raise Puppet::Error, "Failed to update #{self.name}: #{detail}"
+      raise Puppet::Error, "Failed to update #{self.name}: #{detail}", detail.backtrace
     end
   end
 

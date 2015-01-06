@@ -15,9 +15,9 @@ describe Puppet::Util::Pson do
     }.to raise_error(ArgumentError, /No data provided in pson data/)
   end
 
-  it "should call 'from_pson' with the provided data" do
+  it "should call 'from_data_hash' with the provided data" do
     pson = PsonUtil.new
-    pson.expects(:from_pson).with("mydata")
+    pson.expects(:from_data_hash).with("mydata")
     pson.pson_create("type" => "foo", "data" => "mydata")
   end
 
@@ -62,5 +62,10 @@ describe Puppet::Util::Pson do
   it "should be able to handle invalid UTF8 bytes" do
     s = ["\xc3\xc3"]
     PSON.parse( [s].to_pson ).should == [s]
+  end
+
+  it "should be able to parse JSON containing UTF-8 characters in strings" do
+    s = '{ "foö": "bár" }'
+    lambda { PSON.parse s }.should_not raise_error
   end
 end

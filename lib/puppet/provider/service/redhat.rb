@@ -10,15 +10,6 @@ Puppet::Type.type(:service).provide :redhat, :parent => :init, :source => :init 
 
   defaultfor :osfamily => [:redhat, :suse]
 
-  def self.instances
-    # this exclude list is all from /sbin/service (5.x), but I did not exclude kudzu
-    self.get_services(['/etc/init.d'], ['functions', 'halt', 'killall', 'single', 'linuxconf', 'reboot', 'boot'])
-  end
-
-  def self.defpath
-    superclass.defpath
-  end
-
   # Remove the symlinks
   def disable
     # The off method operates on run levels 2,3,4 and 5 by default We ensure
@@ -26,21 +17,21 @@ Puppet::Type.type(:service).provide :redhat, :parent => :init, :source => :init 
     # service in run levels 0, 1 and/or 6
     output = chkconfig("--level", "0123456", @resource[:name], :off)
   rescue Puppet::ExecutionFailure
-    raise Puppet::Error, "Could not disable #{self.name}: #{output}"
+    raise Puppet::Error, "Could not disable #{self.name}: #{output}", $!.backtrace
   end
 
   def enabled?
+    name = @resource[:name]
+
     begin
-      output = chkconfig(@resource[:name])
+      output = chkconfig name
     rescue Puppet::ExecutionFailure
       return :false
     end
 
-    # If it's disabled on SuSE, then it will print output showing "off"
-    # at the end
-    if output =~ /.* off$/
-      return :false
-    end
+    # For Suse OS family, chkconfig returns 0 even if the service is disabled or non-existent
+    # Therefore, check the output for '<name>  on' to see if it is enabled
+    return :false unless Facter.value(:osfamily) != 'Suse' || output =~ /^#{name}\s+on$/
 
     :true
   end
@@ -48,9 +39,9 @@ Puppet::Type.type(:service).provide :redhat, :parent => :init, :source => :init 
   # Don't support them specifying runlevels; always use the runlevels
   # in the init scripts.
   def enable
-      output = chkconfig(@resource[:name], :on)
+      chkconfig(@resource[:name], :on)
   rescue Puppet::ExecutionFailure => detail
-    raise Puppet::Error, "Could not enable #{self.name}: #{detail}"
+    raise Puppet::Error, "Could not enable #{self.name}: #{detail}", detail.backtrace
   end
 
   def initscript

@@ -1,5 +1,3 @@
-#!/usr/bin/env ruby
-
 # subscriptions are permanent associations determining how different
 # objects react to an event
 
@@ -14,19 +12,24 @@ class Puppet::Relationship
 
   attr_reader :event
 
-  def self.from_pson(pson)
-    source = pson["source"]
-    target = pson["target"]
+  def self.from_data_hash(data)
+    source = data["source"]
+    target = data["target"]
 
     args = {}
-    if event = pson["event"]
+    if event = data["event"]
       args[:event] = event
     end
-    if callback = pson["callback"]
+    if callback = data["callback"]
       args[:callback] = callback
     end
 
     new(source, target, args)
+  end
+
+  def self.from_pson(pson)
+    Puppet.deprecation_warning("from_pson is being removed in favour of from_data_hash.")
+    self.from_data_hash(pson)
   end
 
   def event=(event)
@@ -72,7 +75,7 @@ class Puppet::Relationship
     "{ #{source} => #{target} }"
   end
 
-  def to_pson_data_hash
+  def to_data_hash
     data = {
       'source' => source.to_s,
       'target' => target.to_s
@@ -85,8 +88,13 @@ class Puppet::Relationship
     data
   end
 
+  # This doesn't include document type as it is part of a catalog
+  def to_pson_data_hash
+    to_data_hash
+  end
+
   def to_pson(*args)
-    to_pson_data_hash.to_pson(*args)
+    to_data_hash.to_pson(*args)
   end
 
   def to_s

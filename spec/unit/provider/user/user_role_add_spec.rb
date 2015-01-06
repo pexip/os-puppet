@@ -116,7 +116,7 @@ describe Puppet::Type.type(:user).provider(:user_role_add), :unless => Puppet.fe
 
   describe "with :allow_duplicates" do
     before do
-      resource.expects(:allowdupe?).returns true
+      resource.stubs(:allowdupe?).returns true
       provider.stubs(:is_role?).returns(false)
       provider.stubs(:execute)
       resource.stubs(:system?).returns false
@@ -267,6 +267,7 @@ FIXTURE
     end
 
     it "should only update the target user" do
+      Date.expects(:today).returns Date.new(2011,12,07)
       write_fixture <<FIXTURE
 before:seriously:15315:0:99999:7:::
 fakeval:seriously:15315:0:99999:7:::
@@ -294,12 +295,29 @@ FIXTURE
       provider.password = "totally"
       File.read(path).should == fixture
     end
+
+    it "should update the lastchg field" do
+      Date.expects(:today).returns Date.new(2013,5,12) # 15837 days after 1970-01-01
+      write_fixture <<FIXTURE
+before:seriously:15315:0:99999:7:::
+fakeval:seriously:15629:0:99999:7:::
+fakevalish:seriously:15315:0:99999:7:::
+after:seriously:15315:0:99999:7:::
+FIXTURE
+      provider.password = "totally"
+      File.read(path).should == <<EOT
+before:seriously:15315:0:99999:7:::
+fakeval:totally:15837:0:99999:7:::
+fakevalish:seriously:15315:0:99999:7:::
+after:seriously:15315:0:99999:7:::
+EOT
+    end
   end
 
   describe "#shadow_entry" do
     it "should return the line for the right user" do
       File.stubs(:readlines).returns(["someuser:!:10:5:20:7:1::\n", "fakeval:*:20:10:30:7:2::\n", "testuser:*:30:15:40:7:3::\n"])
-      provider.shadow_entry.should == ["fakeval", "*", "20", "10", "30", "7", "2"]
+      provider.shadow_entry.should == ["fakeval", "*", "20", "10", "30", "7", "2", "", ""]
     end
   end
 
@@ -312,6 +330,28 @@ FIXTURE
     it "should return -1 for no maximum" do
       File.stubs(:readlines).returns(["fakeval:NP:12345::::::\n"])
       provider.password_max_age.should == -1
+    end
+
+    it "should return -1 for no maximum when failed attempts are present" do
+      File.stubs(:readlines).returns(["fakeval:NP:12345::::::3\n"])
+      provider.password_max_age.should == -1
+    end
+  end
+
+  describe "#password_min_age" do
+    it "should return a minimum age number" do
+      File.stubs(:readlines).returns(["fakeval:NP:12345:10:50::::\n"])
+      provider.password_min_age.should == "10"
+    end
+
+    it "should return -1 for no minimum" do
+      File.stubs(:readlines).returns(["fakeval:NP:12345::::::\n"])
+      provider.password_min_age.should == -1
+    end
+
+    it "should return -1 for no minimum when failed attempts are present" do
+      File.stubs(:readlines).returns(["fakeval:NP:12345::::::3\n"])
+      provider.password_min_age.should == -1
     end
   end
 end

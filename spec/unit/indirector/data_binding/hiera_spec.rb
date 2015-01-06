@@ -2,10 +2,6 @@ require 'spec_helper'
 require 'puppet/indirector/data_binding/hiera'
 
 describe Puppet::DataBinding::Hiera do
-  it "should be a subclass of the Hiera terminus" do
-    Puppet::DataBinding::Hiera.superclass.should equal(Puppet::Indirector::Hiera)
-  end
-
   it "should have documentation" do
     Puppet::DataBinding::Hiera.doc.should_not be_nil
   end
@@ -18,4 +14,6 @@ describe Puppet::DataBinding::Hiera do
   it "should have its name set to :hiera" do
     Puppet::DataBinding::Hiera.name.should == :hiera
   end
+
+  it_should_behave_like "Hiera indirection", Puppet::DataBinding::Hiera, my_fixture_dir
 end

@@ -2,6 +2,7 @@ Puppet::Type.type(:file).provide :posix do
   desc "Uses POSIX functionality to manage file ownership and permissions."
 
   confine :feature => :posix
+  has_features :manages_symlinks
 
   include Puppet::Util::POSIX
   include Puppet::Util::Warnings
@@ -80,7 +81,7 @@ Puppet::Type.type(:file).provide :posix do
     begin
       File.send(method, should, nil, resource[:path])
     rescue => detail
-      raise Puppet::Error, "Failed to set owner to '#{should}': #{detail}"
+      raise Puppet::Error, "Failed to set owner to '#{should}': #{detail}", detail.backtrace
     end
   end
 
@@ -111,7 +112,7 @@ Puppet::Type.type(:file).provide :posix do
     begin
       File.send(method, nil, should, resource[:path])
     rescue => detail
-      raise Puppet::Error, "Failed to set group to '#{should}': #{detail}"
+      raise Puppet::Error, "Failed to set group to '#{should}': #{detail}", detail.backtrace
     end
   end
 

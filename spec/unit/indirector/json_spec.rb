@@ -120,7 +120,7 @@ describe Puppet::Indirector::JSON do
 
         subject.save(request)
 
-        File.should be_directory target
+        File.should be_directory(target)
       end
     end
 
@@ -131,20 +131,20 @@ describe Puppet::Indirector::JSON do
         with_content('hello') do
           subject.destroy(request)
         end
-        File.should_not be_exist file
+        Puppet::FileSystem.exist?(file).should be_false
       end
 
       it "silently succeeds when files don't exist" do
-        File.unlink(file) rescue nil
+        Puppet::FileSystem.unlink(file) rescue nil
         subject.destroy(request).should be_true
       end
 
       it "raises an informative error for other failures" do
-        File.stubs(:unlink).with(file).raises(Errno::EPERM, 'fake permission problem')
+        Puppet::FileSystem.stubs(:unlink).with(file).raises(Errno::EPERM, 'fake permission problem')
         with_content('hello') do
-          expect { subject.destroy(request) }.to raise_error Puppet::Error
+          expect { subject.destroy(request) }.to raise_error(Puppet::Error)
         end
-        File.unstub(:unlink)    # thanks, mocha
+        Puppet::FileSystem.unstub(:unlink)    # thanks, mocha
       end
     end
   end

@@ -52,7 +52,7 @@ module Puppet::Rails::Benchmark
 
     file = "/tmp/time_debugging.yaml"
 
-    if FileTest.exist?(file)
+    if Puppet::FileSystem.exist?(file)
       data = YAML.load_file(file)
     else
       data = {}

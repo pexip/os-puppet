@@ -3,14 +3,13 @@ require 'uri'
 require 'tempfile'
 
 require 'puppet/util/checksums'
-require 'puppet/network/http/api/v1'
+require 'puppet/network/http'
 require 'puppet/network/http/compression'
 
 module Puppet
   Puppet::Type.type(:file).newproperty(:content) do
     include Puppet::Util::Diff
     include Puppet::Util::Checksums
-    include Puppet::Network::HTTP::API::V1
     include Puppet::Network::HTTP::Compression.module
 
     attr_reader :actual_content
@@ -39,6 +38,7 @@ module Puppet
 
       ...but for larger files, this attribute is more useful when combined with the
       [template](http://docs.puppetlabs.com/references/latest/function.html#template)
+      or [file](http://docs.puppetlabs.com/references/latest/function.html#file)
       function.
     EOT
 
@@ -75,7 +75,7 @@ module Puppet
     def checksum_type
       if source = resource.parameter(:source)
         result = source.checksum
-      else checksum = resource.parameter(:checksum)
+      else
         result = resource[:checksum]
       end
       if result =~ /^\{(\w+)\}.+/
@@ -100,6 +100,9 @@ module Puppet
       if resource.should_be_file?
         return false if is == :absent
       else
+        if resource[:ensure] == :present and resource[:content] and s = resource.stat
+          resource.warning "Ensure set to :present but file type is #{s.ftype} so no content will be synced"
+        end
         return true
       end
 
@@ -107,9 +110,9 @@ module Puppet
 
       result = super
 
-      if ! result and Puppet[:show_diff]
+      if ! result and Puppet[:show_diff] and resource.show_diff?
         write_temporarily do |path|
-          notice "\n" + diff(@resource[:path], path)
+          send @resource[:loglevel], "\n" + diff(@resource[:path], path)
         end
       end
       result
@@ -124,12 +127,15 @@ module Puppet
       begin
         resource.parameter(:checksum).sum_file(resource[:path])
       rescue => detail
-        raise Puppet::Error, "Could not read #{ftype} #{@resource.title}: #{detail}"
+        raise Puppet::Error, "Could not read #{ftype} #{@resource.title}: #{detail}", detail.backtrace
       end
     end
 
     # Make sure we're also managing the checksum property.
     def should=(value)
+      # treat the value as a bytestring, in Ruby versions that support it, regardless of the encoding
+      # in which it has been supplied
+      value = value.clone.force_encoding(Encoding::ASCII_8BIT) if value.respond_to?(:force_encoding)
       @resource.newattr(:checksum) unless @resource.parameter(:checksum)
       super
     end
@@ -201,11 +207,12 @@ module Puppet
     end
 
     def get_from_source(source_or_content, &block)
-      request = Puppet::Indirector::Request.new(:file_content, :find, source_or_content.full_path.sub(/^\//,''), nil, :environment => resource.catalog.environment)
+      source = source_or_content.metadata.source
+      request = Puppet::Indirector::Request.new(:file_content, :find, source, nil, :environment => resource.catalog.environment)
 
       request.do_request(:fileserver) do |req|
         connection = Puppet::Network::HttpPool.http_instance(req.server, req.port)
-        connection.request_get(indirection2uri(req), add_accept_encoding({"Accept" => "raw"}), &block)
+        connection.request_get(Puppet::Network::HTTP::API::V1.indirection2uri(req), add_accept_encoding({"Accept" => "raw"}), &block)
       end
     end
 
@@ -228,7 +235,7 @@ module Puppet
 
       dipper.getfile(sum)
     rescue => detail
-      fail "Could not retrieve content for #{should} from filebucket: #{detail}"
+      self.fail Puppet::Error, "Could not retrieve content for #{should} from filebucket: #{detail}", detail
     end
   end
 end

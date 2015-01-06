@@ -1,20 +1,27 @@
 require 'puppet'
 require 'puppet/util/autoload'
-require 'puppet/interface/documentation'
 require 'prettyprint'
 require 'semver'
 
 # @api public
 class Puppet::Interface
-  include FullDocs
-
+  require 'puppet/interface/documentation'
   require 'puppet/interface/face_collection'
 
+  require 'puppet/interface/action'
+  require 'puppet/interface/action_builder'
   require 'puppet/interface/action_manager'
+
+  require 'puppet/interface/option'
+  require 'puppet/interface/option_builder'
+  require 'puppet/interface/option_manager'
+
+
+  include FullDocs
+
   include Puppet::Interface::ActionManager
   extend Puppet::Interface::ActionManager
 
-  require 'puppet/interface/option_manager'
   include Puppet::Interface::OptionManager
   extend Puppet::Interface::OptionManager
 
@@ -94,7 +101,7 @@ class Puppet::Interface
     def [](name, version)
       unless face = Puppet::Interface::FaceCollection[name, version]
         # REVISIT (#18042) no sense in rechecking if version == :current -- josh
-        if current = Puppet::Interface::FaceCollection[name, :current]
+        if Puppet::Interface::FaceCollection[name, :current]
           raise Puppet::Error, "Could not find version #{version} of #{name}"
         else
           raise Puppet::Error, "Could not find Puppet Face #{name.to_s}"

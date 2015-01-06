@@ -40,6 +40,13 @@ Puppet::Face.define(:module, '1.0.0') do
       EOT
     end
 
+    option "--ignore-changes", "-c" do
+      summary "Ignore any local changes made. (Implied by --force.)"
+      description <<-EOT
+        Uninstall an installed module even if there are local changes to it.  (Implied by --force.)
+      EOT
+    end
+
     option "--version=" do
       summary "The version of the module to uninstall"
       description <<-EOT
@@ -50,7 +57,7 @@ Puppet::Face.define(:module, '1.0.0') do
 
     when_invoked do |name, options|
       name = name.gsub('/', '-')
-      
+
       Puppet::ModuleTool.set_option_defaults options
       Puppet.notice "Preparing to uninstall '#{name}'" << (options[:version] ? " (#{colorize(:cyan, options[:version].sub(/^(?=\d)/, 'v'))})" : '') << " ..."
       Puppet::ModuleTool::Applications::Uninstaller.run(name, options)

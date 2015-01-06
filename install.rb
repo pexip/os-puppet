@@ -51,7 +51,7 @@ rescue LoadError
   $haverdoc = false
 end
 
-PREREQS = %w{openssl facter cgi}
+PREREQS = %w{openssl facter cgi hiera}
 MIN_FACTER_VERSION = 1.5
 
 InstallOptions = OpenStruct.new
@@ -107,7 +107,8 @@ end
 
 def do_libs(libs, strip = 'lib/')
   libs.each do |lf|
-    olf = File.join(InstallOptions.site_dir, lf.gsub(/#{strip}/, ''))
+    next if File.directory? lf
+    olf = File.join(InstallOptions.site_dir, lf.sub(/^#{strip}/, ''))
     op = File.dirname(olf)
     if $haveftools
       File.makedirs(op, true)
@@ -249,7 +250,7 @@ def prepare_installation
     begin
       require 'win32/dir'
     rescue LoadError => e
-      puts "Cannot run on Microsoft Windows without the sys-admin, win32-process, win32-dir & win32-service gems: #{e}"
+      puts "Cannot run on Microsoft Windows without the win32-process, win32-dir & win32-service gems: #{e}"
       exit -1
     end
     configdir = File.join(Dir::COMMON_APPDATA, "PuppetLabs", "puppet", "etc")
@@ -414,7 +415,7 @@ FileUtils.cd File.dirname(__FILE__) do
   rdoc  = glob(%w{bin/* lib/**/*.rb README* }).reject { |e| e=~ /\.(bat|cmd)$/ }
   ri    = glob(%w{bin/*.rb lib/**/*.rb}).reject { |e| e=~ /\.(bat|cmd)$/ }
   man   = glob(%w{man/man[0-9]/*})
-  libs  = glob(%w{lib/**/*.rb lib/**/*.erb lib/**/*.py lib/puppet/util/command_line/*})
+  libs  = glob(%w{lib/**/*})
 
   check_prereqs
   prepare_installation

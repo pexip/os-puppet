@@ -6,7 +6,8 @@ require 'puppet/application/doc'
 describe Puppet::Application::Doc do
   include PuppetSpec::Files
 
-  it "should not generate an error when module dir overlaps parent of site.pp (#4798)", :if => Puppet.features.rdoc1?, :unless => Puppet.features.microsoft_windows? do
+  it "should not generate an error when module dir overlaps parent of site.pp (#4798)",
+     :if => (Puppet.features.rdoc1? and not Puppet.features.microsoft_windows?) do
     begin
       # Note: the directory structure below is more complex than it
       # needs to be, but it's representative of the directory structure
@@ -34,13 +35,14 @@ describe Puppet::Application::Doc do
       end
 
       puppet = Puppet::Application[:doc]
-      Puppet[:modulepath] = modules_dir
-      Puppet[:manifest] = site_file
       puppet.options[:mode] = :rdoc
 
-      expect { puppet.run_command }.to exit_with 0
+      env = Puppet::Node::Environment.create(:rdoc, [modules_dir], site_file) 
+      Puppet.override(:current_environment =>  env) do
+        expect { puppet.run_command }.to exit_with 0
+      end
 
-      File.should be_exist('doc')
+      Puppet::FileSystem.exist?('doc').should be_true
     ensure
       Dir.chdir(old_dir)
     end

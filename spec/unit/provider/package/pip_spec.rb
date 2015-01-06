@@ -90,6 +90,22 @@ describe provider_class do
       @provider.query.should == nil
     end
 
+    it "should be case insensitive" do
+      @resource[:name] = "Real_Package"
+
+      provider_class.expects(:instances).returns [provider_class.new({
+        :ensure   => "1.2.5",
+        :name     => "real_package",
+        :provider => :pip,
+      })]
+
+      @provider.query.should == {
+        :ensure   => "1.2.5",
+        :name     => "real_package",
+        :provider => :pip,
+      }
+    end
+
   end
 
   describe "latest" do
@@ -191,6 +207,10 @@ describe provider_class do
   end
 
   describe "lazy_pip" do
+
+    after(:each) do
+      Puppet::Type::Package::ProviderPip.instance_variable_set(:@confine_collection, nil)
+    end
 
     it "should succeed if pip is present" do
       @provider.stubs(:pip).returns(nil)

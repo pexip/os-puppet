@@ -10,9 +10,14 @@ module Puppet
 
     desc <<-'EOT'
       The desired permissions mode for the file, in symbolic or numeric
-      notation. Puppet uses traditional Unix permission schemes and translates
+      notation. This value should be specified as a quoted string; do not use
+      un-quoted numbers to represent file modes.
+
+      The `file` type uses traditional Unix permission schemes and translates
       them to equivalent permissions for systems which represent permissions
-      differently, including Windows.
+      differently, including Windows. For detailed ACL controls on Windows,
+      you can leave `mode` unmanaged and use
+      [the puppetlabs/acl module.](https://forge.puppetlabs.com/puppetlabs/acl)
 
       Numeric modes should use the standard four-digit octal notation of
       `<setuid/setgid/sticky><owner><group><other>` (e.g. 0644). Each of the
@@ -39,8 +44,12 @@ module Puppet
           * g (group's current permissions)
           * o (other's current permissions)
 
-      Thus, mode `0664` could be represented symbolically as either `a=r,ug+w` or
-      `ug=rw,o=r`. See the manual page for GNU or BSD `chmod` for more details
+      Thus, mode `0664` could be represented symbolically as either `a=r,ug+w`
+      or `ug=rw,o=r`.  However, symbolic modes are more expressive than numeric
+      modes: a mode only affects the specified bits, so `mode => 'ug+w'` will
+      set the user and group write bits, without affecting any other bits.
+
+      See the manual page for GNU or BSD `chmod` for more details
       on numeric and symbolic modes.
 
       On Windows, permissions are translated as follows:
@@ -56,6 +65,10 @@ module Puppet
     EOT
 
     validate do |value|
+      if !value.is_a?(String)
+        Puppet.deprecation_warning("Non-string values for the file mode property are deprecated. It must be a string, " \
+          "either a symbolic mode like 'o+w,a+r' or an octal representation like '0644' or '755'.")
+      end
       unless value.nil? or valid_symbolic_mode?(value)
         raise Puppet::Error, "The file mode specification is invalid: #{value.inspect}"
       end
@@ -73,14 +86,13 @@ module Puppet
 
     def desired_mode_from_current(desired, current)
       current = current.to_i(8) if current.is_a? String
-      is_a_directory = @resource.stat and @resource.stat.directory?
+      is_a_directory = @resource.stat && @resource.stat.directory?
       symbolic_mode_to_int(desired, current, is_a_directory)
     end
 
     # If we're a directory, we need to be executable for all cases
     # that are readable.  This should probably be selectable, but eh.
     def dirmask(value)
-      orig = value
       if FileTest.directory?(resource[:path]) and value =~ /^\d+$/ then
         value = value.to_i(8)
         value |= 0100 if value & 0400 != 0
@@ -144,7 +156,13 @@ module Puppet
     end
 
     def is_to_s(currentvalue)
-      currentvalue.rjust(4, "0")
+      if currentvalue == :absent
+        # This can occur during audits---if a file is transitioning from
+        # present to absent the mode will have a value of `:absent`.
+        super
+      else
+        currentvalue.rjust(4, "0")
+      end
     end
   end
 end

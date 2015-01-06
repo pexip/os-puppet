@@ -1,12 +1,9 @@
-require 'forwardable'
 require 'puppet/resource'
 
 # The primary difference between this class and its
 # parent is that this class has rules on who can set
 # parameters
 class Puppet::Parser::Resource < Puppet::Resource
-  extend Forwardable
-
   require 'puppet/parser/resource/param'
   require 'puppet/util/tagging'
   require 'puppet/parser/yaml_trimmer'
@@ -18,7 +15,6 @@ class Puppet::Parser::Resource < Puppet::Resource
   include Puppet::Util::MethodHelper
   include Puppet::Util::Errors
   include Puppet::Util::Logging
-  include Puppet::Util::Tagging
   include Puppet::Parser::YamlTrimmer
 
   attr_accessor :source, :scope, :collector_id
@@ -56,7 +52,9 @@ class Puppet::Parser::Resource < Puppet::Resource
     end
   end
 
-  def_delegator :scope, :environment
+  def environment
+    scope.environment
+  end
 
   # Process the  stage metaparameter for a class.   A containment edge
   # is drawn from  the class to the stage.   The stage for containment
@@ -164,12 +162,10 @@ class Puppet::Parser::Resource < Puppet::Resource
   # if we ever receive a parameter named 'tag', set
   # the resource tags with its value.
   def set_parameter(param, value = nil)
-    if ! value.nil?
+    if ! param.is_a?(Puppet::Parser::Resource::Param)
       param = Puppet::Parser::Resource::Param.new(
         :name => param, :value => value, :source => self.source
       )
-    elsif ! param.is_a?(Puppet::Parser::Resource::Param)
-      raise ArgumentError, "Received incomplete information - no value provided for parameter #{param}"
     end
 
     tag(*param.value) if param.name == :tag
@@ -182,53 +178,27 @@ class Puppet::Parser::Resource < Puppet::Resource
   def to_hash
     @parameters.inject({}) do |hash, ary|
       param = ary[1]
-      # Skip "undef" values.
-      hash[param.name] = param.value if param.value != :undef
+      # Skip "undef" and nil values.
+      hash[param.name] = param.value if param.value != :undef && !param.value.nil?
       hash
     end
   end
 
-
-  # Create a Puppet::Resource instance from this parser resource.
-  # We plan, at some point, on not needing to do this conversion, but
-  # it's sufficient for now.
-  def to_resource
-    result = Puppet::Resource.new(type, title)
-
-    to_hash.each do |p, v|
-      if v.is_a?(Puppet::Resource)
-        v = Puppet::Resource.new(v.type, v.title)
-      elsif v.is_a?(Array)
-        # flatten resource references arrays
-        v = v.flatten if v.flatten.find { |av| av.is_a?(Puppet::Resource) }
-        v = v.collect do |av|
-          av = Puppet::Resource.new(av.type, av.title) if av.is_a?(Puppet::Resource)
-          av
-        end
-      end
-
-      # If the value is an array with only one value, then
-      # convert it to a single value.  This is largely so that
-      # the database interaction doesn't have to worry about
-      # whether it returns an array or a string.
-      result[p] = if v.is_a?(Array) and v.length == 1
-                    v[0]
-                  else
-                    v
-                  end
-    end
-
-    result.file = self.file
-    result.line = self.line
-    result.exported = self.exported
-    result.virtual = self.virtual
-    result.tag(*self.tags)
-
-    result
+  # Convert this resource to a RAL resource.
+  def to_ral
+    copy_as_resource.to_ral
   end
 
-  # Convert this resource to a RAL resource.
-  def_delegator :to_resource, :to_ral
+  # Is the receiver tagged with the given tags?
+  # This match takes into account the tags that a resource will inherit from its container
+  # but have not been set yet.
+  # It does *not* take tags set via resource defaults as these will *never* be set on
+  # the resource itself since all resources always have tags that are automatically
+  # assigned.
+  #
+  def tagged?(*tags)
+    super || ((scope_resource = scope.resource) && scope_resource != self && scope_resource.tagged?(tags))
+  end
 
   private
 
@@ -266,7 +236,6 @@ class Puppet::Parser::Resource < Puppet::Resource
         msg += " at #{fields.join(":")}"
       end
       msg += "; cannot redefine"
-      Puppet.log_exception(ArgumentError.new(), msg)
       raise Puppet::ParseError.new(msg, param.line, param.file)
     end
 
@@ -292,7 +261,7 @@ class Puppet::Parser::Resource < Puppet::Resource
       validate_parameter(name)
     end
   rescue => detail
-    fail Puppet::ParseError, detail.to_s
+    self.fail Puppet::ParseError, detail.to_s + " on #{self}", detail
   end
 
   def extract_parameters(params)

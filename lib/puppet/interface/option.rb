@@ -1,5 +1,3 @@
-require 'puppet/interface'
-
 # This represents an option on an action or face (to be globally applied
 # to its actions). Options should be constructed by calling
 # {Puppet::Interface::OptionManager#option}, which is available on
@@ -86,7 +84,7 @@ class Puppet::Interface::Option
     unless found = declaration.match(/^-+(?:\[no-\])?([^ =]+)/) then
       raise ArgumentError, "Can't find a name in the declaration #{declaration.inspect}"
     end
-    name = found.captures.first
+    found.captures.first
   end
 
   # @api private

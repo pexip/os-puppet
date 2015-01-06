@@ -8,7 +8,12 @@ Puppet::Type.type(:package).provide(:windows, :parent => Puppet::Provider::Packa
     This provider supports either MSI or self-extracting executable installers.
 
     This provider requires a `source` attribute when installing the package.
-    It accepts paths paths to local files, mapped drives, or UNC paths.
+    It accepts paths to local files, mapped drives, or UNC paths.
+
+    This provider supports the `install_options` and `uninstall_options`
+    attributes, which allow command-line flags to be passed to the installer.
+    These options should be specified as a string (e.g. '--flag'), a hash (e.g. {'--flag' => 'value'}),
+    or an array where each element is either a string or a hash.
 
     If the executable requires special arguments to perform a silent install or
     uninstall, then the appropriate arguments should be specified using the
@@ -22,6 +27,7 @@ Puppet::Type.type(:package).provide(:windows, :parent => Puppet::Provider::Packa
   has_feature :uninstallable
   has_feature :install_options
   has_feature :uninstall_options
+  has_feature :versionable
 
   attr_accessor :package
 
@@ -37,9 +43,7 @@ Puppet::Type.type(:package).provide(:windows, :parent => Puppet::Provider::Packa
   def self.to_hash(pkg)
     {
       :name     => pkg.name,
-      # we're not versionable, so we can't set the ensure
-      # parameter to the currently installed version
-      :ensure   => :installed,
+      :ensure   => pkg.version || :installed,
       :provider => :windows
     }
   end
@@ -59,26 +63,22 @@ Puppet::Type.type(:package).provide(:windows, :parent => Puppet::Provider::Packa
     installer = Puppet::Provider::Package::Windows::Package.installer_class(resource)
 
     command = [installer.install_command(resource), install_options].flatten.compact.join(' ')
-    execute(command, :failonfail => false, :combine => true)
+    output = execute(command, :failonfail => false, :combine => true)
 
-    check_result(exit_status)
+    check_result(output.exitstatus)
   end
 
   def uninstall
     command = [package.uninstall_command, uninstall_options].flatten.compact.join(' ')
-    execute(command, :failonfail => false, :combine => true)
+    output = execute(command, :failonfail => false, :combine => true)
 
-    check_result(exit_status)
-  end
-
-  def exit_status
-    $CHILD_STATUS.exitstatus
+    check_result(output.exitstatus)
   end
 
   # http://msdn.microsoft.com/en-us/library/windows/desktop/aa368542(v=vs.85).aspx
-  ERROR_SUCCESS                  = 0
-  ERROR_SUCCESS_REBOOT_INITIATED = 1641
-  ERROR_SUCCESS_REBOOT_REQUIRED  = 3010
+  self::ERROR_SUCCESS                  = 0
+  self::ERROR_SUCCESS_REBOOT_INITIATED = 1641
+  self::ERROR_SUCCESS_REBOOT_REQUIRED  = 3010
 
   # (Un)install may "fail" because the package requested a reboot, the system requested a
   # reboot, or something else entirely. Reboot requests mean the package was installed
@@ -87,20 +87,18 @@ Puppet::Type.type(:package).provide(:windows, :parent => Puppet::Provider::Packa
     operation = resource[:ensure] == :absent ? 'uninstall' : 'install'
 
     case hr
-    when ERROR_SUCCESS
+    when self.class::ERROR_SUCCESS
       # yeah
-    when 194
-      warning("The package requested a reboot to finish the operation.")
-    when ERROR_SUCCESS_REBOOT_INITIATED
+    when self.class::ERROR_SUCCESS_REBOOT_INITIATED
       warning("The package #{operation}ed successfully and the system is rebooting now.")
-    when ERROR_SUCCESS_REBOOT_REQUIRED
+    when self.class::ERROR_SUCCESS_REBOOT_REQUIRED
       warning("The package #{operation}ed successfully, but the system must be rebooted.")
     else
       raise Puppet::Util::Windows::Error.new("Failed to #{operation}", hr)
     end
   end
 
-  # This only get's called if there is a value to validate, but not if it's absent
+  # This only gets called if there is a value to validate, but not if it's absent
   def validate_source(value)
     fail("The source parameter cannot be empty when using the Windows provider.") if value.empty?
   end
@@ -111,20 +109,5 @@ Puppet::Type.type(:package).provide(:windows, :parent => Puppet::Provider::Packa
 
   def uninstall_options
     join_options(resource[:uninstall_options])
-  end
-
-  def join_options(options)
-    return unless options
-
-    options.collect do |val|
-      case val
-      when Hash
-        val.keys.sort.collect do |k|
-          "#{k}=#{val[k]}"
-        end.join(' ')
-      else
-        val
-      end
-    end
   end
 end

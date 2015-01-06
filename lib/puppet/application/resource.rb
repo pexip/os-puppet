@@ -6,7 +6,6 @@ class Puppet::Application::Resource < Puppet::Application
 
   def preinit
     @extra_params = []
-    Facter.loadfacts
   end
 
   option("--debug","-d")
@@ -14,6 +13,7 @@ class Puppet::Application::Resource < Puppet::Application
   option("--edit","-e")
 
   option("--host HOST","-H") do |arg|
+    Puppet.warning("Accessing resources on the network is deprecated. See http://links.puppetlabs.com/deprecate-networked-resource")
     @host = arg
   end
 
@@ -70,9 +70,9 @@ and then apply the saved file as a Puppet transaction.
 
 OPTIONS
 -------
-Note that any configuration parameter that's valid in the configuration
+Note that any setting that's valid in the configuration
 file is also a valid long argument. For example, 'ssldir' is a valid
-configuration parameter, so you can specify '--ssldir <directory>' as an
+setting, so you can specify '--ssldir <directory>' as an
 argument.
 
 See the configuration file documentation at
@@ -151,12 +151,7 @@ Copyright (c) 2011 Puppet Labs, LLC Licensed under the Apache 2.0 License
 
   def setup
     Puppet::Util::Log.newdestination(:console)
-
-    if options[:debug]
-      Puppet::Util::Log.level = :debug
-    elsif options[:verbose]
-      Puppet::Util::Log.level = :info
-    end
+    set_log_level
   end
 
   private

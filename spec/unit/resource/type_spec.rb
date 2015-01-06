@@ -1,9 +1,12 @@
 #! /usr/bin/env ruby
 require 'spec_helper'
-
 require 'puppet/resource/type'
 
+require 'matchers/json'
+
 describe Puppet::Resource::Type do
+  include JSONMatchers
+
   it "should have a 'name' attribute" do
     Puppet::Resource::Type.new(:hostclass, "foo").name.should == "foo"
   end
@@ -36,16 +39,30 @@ describe Puppet::Resource::Type do
     end
 
     def from_json(json)
-      Puppet::Resource::Type.from_pson(json)
+      Puppet::Resource::Type.from_data_hash(json)
     end
 
     def double_convert
-      Puppet::Resource::Type.from_pson(PSON.parse(@type.to_pson))
+      Puppet::Resource::Type.from_data_hash(PSON.parse(@type.to_pson))
     end
 
     it "should include the name and type" do
       double_convert.name.should == @type.name
       double_convert.type.should == @type.type
+    end
+
+    it "should validate with only name and kind" do
+      expect(@type.to_pson).to validate_against('api/schemas/resource_type.json')
+    end
+
+    it "should validate with all fields set" do
+      @type.set_arguments("one" => nil, "two" => "foo")
+      @type.line = 100
+      @type.doc = "A weird type"
+      @type.file = "/etc/manifests/thing.pp"
+      @type.parent = "one::two"
+
+      expect(@type.to_pson).to validate_against('api/schemas/resource_type.json')
     end
 
     it "should include any arguments" do
@@ -80,7 +97,7 @@ describe Puppet::Resource::Type do
       lambda { Puppet::Resource::Type.new(:node, /foo/) }.should_not raise_error
     end
 
-    it "should allow a AST::HostName instance as its name" do
+    it "should allow an AST::HostName instance as its name" do
       regex = Puppet::Parser::AST::Regex.new(:value => /foo/)
       name = Puppet::Parser::AST::HostName.new(:value => regex)
       lambda { Puppet::Resource::Type.new(:node, name) }.should_not raise_error
@@ -128,6 +145,10 @@ describe Puppet::Resource::Type do
 
       it "should have a method for matching its regex name against a provided name" do
         Puppet::Resource::Type.new(:node, /.ww/).should respond_to(:match)
+      end
+
+      it "should return true when its regex matches the provided name" do
+        Puppet::Resource::Type.new(:node, /\w/).match("foo").should be_true
       end
 
       it "should return true when its regex matches the provided name" do
@@ -326,14 +347,15 @@ describe Puppet::Resource::Type do
 
   describe "when describing and managing parent classes" do
     before do
-      @krt = Puppet::Node::Environment.new.known_resource_types
+      environment = Puppet::Node::Environment.create(:testing, [])
+      @krt = environment.known_resource_types
       @parent = Puppet::Resource::Type.new(:hostclass, "bar")
       @krt.add @parent
 
       @child = Puppet::Resource::Type.new(:hostclass, "foo", :parent => "bar")
       @krt.add @child
 
-      @scope = Puppet::Parser::Scope.new(Puppet::Parser::Compiler.new(Puppet::Node.new("foo")))
+      @scope = Puppet::Parser::Scope.new(Puppet::Parser::Compiler.new(Puppet::Node.new("foo", :environment => environment)))
     end
 
     it "should be able to define a parent" do
@@ -396,13 +418,29 @@ describe Puppet::Resource::Type do
       @resource.environment.known_resource_types.add @type
     end
 
-    it "should add hostclass names to the classes list" do
+    it "should add node regex captures to its scope" do
+      @type = Puppet::Resource::Type.new(:node, /f(\w)o(.*)$/)
+      match = @type.match('foo')
+
+      code = stub 'code'
+      @type.stubs(:code).returns code
+
+      subscope = stub 'subscope', :compiler => @compiler
+      @scope.expects(:newscope).with(:source => @type, :namespace => '', :resource => @resource).returns subscope
+
+      elevel = 876
+      subscope.expects(:ephemeral_level).returns elevel
+      subscope.expects(:ephemeral_from).with(match, nil, nil).returns subscope
+      code.expects(:safeevaluate).with(subscope)
+      subscope.expects(:unset_ephemeral_var).with(elevel)
+
+      # Just to keep the stub quiet about intermediate calls
+      @type.expects(:set_resource_parameters).with(@resource, subscope)
+
       @type.evaluate_code(@resource)
-      @compiler.catalog.classes.should be_include("foo")
     end
 
-    it "should add node names to the classes list" do
-      @type = Puppet::Resource::Type.new(:node, "foo")
+    it "should add hostclass names to the classes list" do
       @type.evaluate_code(@resource)
       @compiler.catalog.classes.should be_include("foo")
     end
@@ -715,15 +753,6 @@ describe Puppet::Resource::Type do
       dest.doc.should == "foonessyayness"
     end
 
-    it "should turn its code into an ASTArray if necessary" do
-      dest = Puppet::Resource::Type.new(:hostclass, "bar", :code => code("foo"))
-      source = Puppet::Resource::Type.new(:hostclass, "foo", :code => code("bar"))
-
-      dest.merge(source)
-
-      dest.code.should be_instance_of(Puppet::Parser::AST::ASTArray)
-    end
-
     it "should set the other class's code as its code if it has none" do
       dest = Puppet::Resource::Type.new(:hostclass, "bar")
       source = Puppet::Resource::Type.new(:hostclass, "foo", :code => code("bar"))
@@ -734,10 +763,10 @@ describe Puppet::Resource::Type do
     end
 
     it "should append the other class's code to its code if it has any" do
-      dcode = Puppet::Parser::AST::ASTArray.new :children => [code("dest")]
+      dcode = Puppet::Parser::AST::BlockExpression.new(:children => [code("dest")])
       dest = Puppet::Resource::Type.new(:hostclass, "bar", :code => dcode)
 
-      scode = Puppet::Parser::AST::ASTArray.new :children => [code("source")]
+      scode = Puppet::Parser::AST::BlockExpression.new(:children => [code("source")])
       source = Puppet::Resource::Type.new(:hostclass, "foo", :code => scode)
 
       dest.merge(source)

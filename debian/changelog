@@ -1,3 +1,27 @@
+puppet (3.7.3-1puppetlabs1pexip1) pexip; urgency=low
+
+  * New upstream version
+
+ -- John-Mark Bell <jmb@pexip.com>  Tue, 06 Jan 2015 18:29:04 +0000
+
+puppet (3.7.3-1puppetlabs1) hardy lucid natty oneiric unstable sid squeeze wheezy precise; urgency=low
+
+  * Update to version 3.7.3-1puppetlabs1
+
+ -- Puppet Labs Release <info@puppetlabs.com>  Mon, 03 Nov 2014 14:23:20 -0800
+
+puppet (3.2.3-0.1rc0puppetlabs1) lucid unstable sid squeeze wheezy precise quantal raring; urgency=low
+
+  * Update ruby-rgen dependency to 0.6.5
+
+ -- Matthaus Owens <matthaus@puppetlabs.com>  Thu, 27 Jun 2013 14:45:14 +0000
+
+puppet (3.2.0-0.1rc0puppetlabs1) lucid oneiric precise unstable sid squeeze wheezy precise; urgency=low
+
+  * Add ruby-rgen dependency for new parser in Puppet 3.2
+
+ -- Matthaus Owens <matthaus@puppetlabs.com>  Fri, 12 Apr 2013 14:45:14 +0000
+
 puppet (3.1.1-1puppetlabs1pexip13) pexip; urgency=low
 
   * Update for Passenger 4.x.y
@@ -80,12 +104,6 @@ puppet (3.1.1-1puppetlabs1pexip1) precise; urgency=low
   * Add patch to handle system time going backwards
 
  -- John-Mark Bell <jmb@pexip.com>  Thu, 23 May 2013 12:57:37 +0100
-
-puppet (3.1.1-1puppetlabs1) hardy lucid natty oneiric unstable sid squeeze wheezy precise; urgency=low
-
-  * Update to version 3.1.1-1puppetlabs1
-
- -- Puppet Labs Release <info@puppetlabs.com>  Fri, 08 Mar 2013 15:01:49 -0800
 
 puppet (3.1.0-0.1rc1puppetlabs1) lucid natty oneiric precise unstable sid squeeze wheezy precise; urgency=low
 

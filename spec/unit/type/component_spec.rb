@@ -21,15 +21,6 @@ describe component do
     comp.title.should == comp.ref
   end
 
-  it "should alias itself to its reference if it has a catalog and the catalog does not already have a resource with the same reference" do
-    catalog = mock 'catalog'
-    catalog.expects(:resource).with("Foo[bar]").returns nil
-
-    catalog.expects(:alias).with { |resource, name| resource.is_a?(component) and name == "Foo[bar]" }
-
-    component.new(:name => "Foo[bar]", :catalog => catalog)
-  end
-
   it "should not fail when provided an invalid value" do
     comp = component.new(:name => "Foo[bar]")
     lambda { comp[:yayness] = "ey" }.should_not raise_error
@@ -51,8 +42,8 @@ describe component do
       component.new(:name => "Class[foo]").pathbuilder.must == ["Foo"]
     end
 
-    it "should produce an empty string if the component models the 'main' class" do
-      component.new(:name => "Class[main]").pathbuilder.must == [""]
+    it "should produce the class name even for the class named main" do
+      component.new(:name => "Class[main]").pathbuilder.must == ["Main"]
     end
 
     it "should produce a resource reference if the component does not model a class" do

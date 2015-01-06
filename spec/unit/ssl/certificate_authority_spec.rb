@@ -1,4 +1,5 @@
 #! /usr/bin/env ruby
+# encoding: ASCII-8BIT
 require 'spec_helper'
 
 require 'puppet/ssl/certificate_authority'
@@ -6,7 +7,6 @@ require 'puppet/ssl/certificate_authority'
 describe Puppet::SSL::CertificateAuthority do
   after do
     Puppet::SSL::CertificateAuthority.instance_variable_set(:@singleton_instance, nil)
-    Puppet.settings.clearused
   end
 
   def stub_ca_host
@@ -91,12 +91,6 @@ describe Puppet::SSL::CertificateAuthority do
       Puppet::SSL::CertificateAuthority.new
     end
 
-    it "should create an inventory instance" do
-      Puppet::SSL::Inventory.expects(:new).returns "inventory"
-
-      Puppet::SSL::CertificateAuthority.new.inventory.should == "inventory"
-    end
-
     it "should make sure the CA is set up" do
       Puppet::SSL::CertificateAuthority.any_instance.expects(:setup)
 
@@ -170,16 +164,16 @@ describe Puppet::SSL::CertificateAuthority do
     it "should create and store a password at :capass" do
       Puppet[:capass] = File.expand_path("/path/to/pass")
 
-      FileTest.expects(:exist?).with(Puppet[:capass]).returns false
+      Puppet::FileSystem.expects(:exist?).with(Puppet[:capass]).returns false
 
-      fh = mock 'filehandle'
-      Puppet.settings.expects(:write).with(:capass).yields fh
-
-      fh.expects(:print).with { |s| s.length > 18 }
+      fh = StringIO.new
+      Puppet.settings.setting(:capass).expects(:open).with('w').yields fh
 
       @ca.stubs(:sign)
 
       @ca.generate_ca_certificate
+
+      expect(fh.string.length).to be > 18
     end
 
     it "should generate a key if one does not exist" do
@@ -237,11 +231,10 @@ describe Puppet::SSL::CertificateAuthority do
 
       Puppet::SSL::Certificate.stubs(:new).returns @cert
 
-      @cert.stubs(:content=)
       Puppet::SSL::Certificate.indirection.stubs(:save)
 
       # Stub out the factory
-      Puppet::SSL::CertificateFactory.stubs(:build).returns "my real cert"
+      Puppet::SSL::CertificateFactory.stubs(:build).returns @cert.content
 
       @request_content = stub "request content stub", :subject => OpenSSL::X509::Name.new([['CN', @name]]), :public_key => stub('public_key')
       @request = stub 'request', :name => @name, :request_extensions => [], :subject_alt_names => [], :content => @request_content
@@ -252,39 +245,6 @@ describe Puppet::SSL::CertificateAuthority do
       @ca.stubs(:inventory).returns @inventory
 
       Puppet::SSL::CertificateRequest.indirection.stubs(:destroy)
-    end
-
-    describe "and calculating the next certificate serial number" do
-      before do
-        @path = File.expand_path("/path/to/serial")
-        Puppet[:serial] = @path
-
-        @filehandle = stub 'filehandle', :<< => @filehandle
-        Puppet.settings.stubs(:readwritelock).with(:serial).yields @filehandle
-      end
-
-      it "should default to 0x1 for the first serial number" do
-        @ca.next_serial.should == 0x1
-      end
-
-      it "should return the current content of the serial file" do
-        FileTest.stubs(:exist?).with(@path).returns true
-        File.expects(:read).with(@path).returns "0002"
-
-        @ca.next_serial.should == 2
-      end
-
-      it "should write the next serial number to the serial file as hex" do
-        @filehandle.expects(:<<).with("0002")
-
-        @ca.next_serial
-      end
-
-      it "should lock the serial file while writing" do
-        Puppet.settings.expects(:readwritelock).with(:serial)
-
-        @ca.next_serial
-      end
     end
 
     describe "its own certificate" do
@@ -302,28 +262,28 @@ describe Puppet::SSL::CertificateAuthority do
       it "should use a certificate type of :ca" do
         Puppet::SSL::CertificateFactory.expects(:build).with do |*args|
           args[0].should == :ca
-        end.returns "my real cert"
+        end.returns @cert.content
         @ca.sign(@name, :ca, @request)
       end
 
       it "should pass the provided CSR as the CSR" do
         Puppet::SSL::CertificateFactory.expects(:build).with do |*args|
           args[1].should == @request
-        end.returns "my real cert"
+        end.returns @cert.content
         @ca.sign(@name, :ca, @request)
       end
 
       it "should use the provided CSR's content as the issuer" do
         Puppet::SSL::CertificateFactory.expects(:build).with do |*args|
           args[2].subject.to_s.should == "/CN=myhost"
-        end.returns "my real cert"
+        end.returns @cert.content
         @ca.sign(@name, :ca, @request)
       end
 
       it "should pass the next serial as the serial number" do
         Puppet::SSL::CertificateFactory.expects(:build).with do |*args|
           args[3].should == @serial
-        end.returns "my real cert"
+        end.returns @cert.content
         @ca.sign(@name, :ca, @request)
       end
 
@@ -332,7 +292,7 @@ describe Puppet::SSL::CertificateAuthority do
 
         expect do
           @ca.sign(@name, false, @request)
-        end.not_to raise_error(Puppet::SSL::CertificateAuthority::CertificateSigningError)
+        end.not_to raise_error
       end
 
       it "should save the resulting certificate" do
@@ -354,7 +314,7 @@ describe Puppet::SSL::CertificateAuthority do
       it "should use a certificate type of :server" do
         Puppet::SSL::CertificateFactory.expects(:build).with do |*args|
           args[0] == :server
-        end.returns "my real cert"
+        end.returns @cert.content
 
         @ca.sign(@name)
       end
@@ -403,14 +363,14 @@ describe Puppet::SSL::CertificateAuthority do
       it "should use the CA certificate as the issuer" do
         Puppet::SSL::CertificateFactory.expects(:build).with do |*args|
           args[2] == @cacert.content
-        end.returns "my real cert"
-        @ca.sign(@name)
+        end.returns @cert.content
+        signed = @ca.sign(@name)
       end
 
       it "should pass the next serial as the serial number" do
         Puppet::SSL::CertificateFactory.expects(:build).with do |*args|
           args[3] == @serial
-        end.returns "my real cert"
+        end.returns @cert.content
         @ca.sign(@name)
       end
 
@@ -517,6 +477,40 @@ describe Puppet::SSL::CertificateAuthority do
         end
       end
 
+      it "accepts numeric OIDs under the ppRegCertExt subtree" do
+        exts = [{ 'oid' => '1.3.6.1.4.1.34380.1.1.1',
+                  'value' => '657e4780-4cf5-11e3-8f96-0800200c9a66'}]
+
+        @request.stubs(:request_extensions).returns exts
+
+        expect {
+          @ca.check_internal_signing_policies(@name, @request, false)
+        }.to_not raise_error
+      end
+
+      it "accepts short name OIDs under the ppRegCertExt subtree" do
+        exts = [{ 'oid' => 'pp_uuid',
+                  'value' => '657e4780-4cf5-11e3-8f96-0800200c9a66'}]
+
+        @request.stubs(:request_extensions).returns exts
+
+        expect {
+          @ca.check_internal_signing_policies(@name, @request, false)
+        }.to_not raise_error
+      end
+
+      it "accepts OIDs under the ppPrivCertAttrs subtree" do
+        exts = [{ 'oid' => '1.3.6.1.4.1.34380.1.2.1',
+                  'value' => 'private extension'}]
+
+        @request.stubs(:request_extensions).returns exts
+
+        expect {
+          @ca.check_internal_signing_policies(@name, @request, false)
+        }.to_not raise_error
+      end
+
+
       it "should reject a critical extension that isn't on the whitelist" do
         @request.stubs(:request_extensions).returns [{ "oid" => "banana",
                                                        "value" => "yumm",
@@ -609,76 +603,104 @@ describe Puppet::SSL::CertificateAuthority do
     end
 
     describe "when autosigning certificates" do
-      let(:autosign) { File.expand_path("/auto/sign") }
-      it "should do nothing if autosign is disabled" do
-        Puppet[:autosign] = 'false'
+      let(:csr) { Puppet::SSL::CertificateRequest.new("host") }
 
-        Puppet::SSL::CertificateRequest.indirection.expects(:search).never
-        @ca.autosign
-      end
+      describe "using the autosign setting" do
+        let(:autosign) { File.expand_path("/auto/sign") }
 
-      it "should do nothing if no autosign.conf exists" do
-        Puppet[:autosign] = autosign
-        FileTest.expects(:exist?).with(autosign).returns false
+        it "should do nothing if autosign is disabled" do
+          Puppet[:autosign] = false
 
-        Puppet::SSL::CertificateRequest.indirection.expects(:search).never
-        @ca.autosign
-      end
+          @ca.expects(:sign).never
+          @ca.autosign(csr)
+        end
 
-      describe "and autosign is enabled and the autosign.conf file exists" do
-        before do
+        it "should do nothing if no autosign.conf exists" do
           Puppet[:autosign] = autosign
-          FileTest.stubs(:exist?).with(autosign).returns true
-          File.stubs(:readlines).with(autosign).returns ["one\n", "two\n"]
-
-          Puppet::SSL::CertificateRequest.indirection.stubs(:search).returns []
-
-          @store = stub 'store', :allow => nil
-          Puppet::Network::AuthStore.stubs(:new).returns @store
-        end
-
-        describe "when creating the AuthStore instance to verify autosigning" do
-          it "should create an AuthStore with each line in the configuration file allowed to be autosigned" do
-            Puppet::Network::AuthStore.expects(:new).returns @store
-
-            @store.expects(:allow).with("one")
-            @store.expects(:allow).with("two")
-
-            @ca.autosign
-          end
-
-          it "should reparse the autosign configuration on each call" do
-            Puppet::Network::AuthStore.expects(:new).times(2).returns @store
-
-            @ca.autosign
-            @ca.autosign
-          end
-
-          it "should ignore comments" do
-            File.stubs(:readlines).with(autosign).returns ["one\n", "#two\n"]
-
-            @store.expects(:allow).with("one")
-            @ca.autosign
-          end
-
-          it "should ignore blank lines" do
-            File.stubs(:readlines).with(autosign).returns ["one\n", "\n"]
-
-            @store.expects(:allow).with("one")
-            @ca.autosign
+          non_existent_file = Puppet::FileSystem::MemoryFile.a_missing_file(autosign)
+          Puppet::FileSystem.overlay(non_existent_file) do
+            @ca.expects(:sign).never
+            @ca.autosign(csr)
           end
         end
 
-        it "should sign all CSRs whose hostname matches the autosign configuration" do
-          csr1 = mock 'csr1'
-          csr2 = mock 'csr2'
-          Puppet::SSL::CertificateRequest.indirection.stubs(:search).returns [csr1, csr2]
+        describe "and autosign is enabled and the autosign.conf file exists" do
+          let(:store) { stub 'store', :allow => nil, :allowed? => false }
+
+          before do
+            Puppet[:autosign] = autosign
+          end
+
+          describe "when creating the AuthStore instance to verify autosigning" do
+            it "should create an AuthStore with each line in the configuration file allowed to be autosigned" do
+              Puppet::FileSystem.overlay(Puppet::FileSystem::MemoryFile.a_regular_file_containing(autosign, "one\ntwo\n")) do
+                Puppet::Network::AuthStore.stubs(:new).returns store
+
+                store.expects(:allow).with("one")
+                store.expects(:allow).with("two")
+
+                @ca.autosign(csr)
+              end
+            end
+
+            it "should reparse the autosign configuration on each call" do
+              Puppet::FileSystem.overlay(Puppet::FileSystem::MemoryFile.a_regular_file_containing(autosign, "one")) do
+                Puppet::Network::AuthStore.stubs(:new).times(2).returns store
+
+                @ca.autosign(csr)
+                @ca.autosign(csr)
+              end
+            end
+
+            it "should ignore comments" do
+              Puppet::FileSystem.overlay(Puppet::FileSystem::MemoryFile.a_regular_file_containing(autosign, "one\n#two\n")) do
+                Puppet::Network::AuthStore.stubs(:new).returns store
+
+                store.expects(:allow).with("one")
+
+                @ca.autosign(csr)
+              end
+            end
+
+            it "should ignore blank lines" do
+              Puppet::FileSystem.overlay(Puppet::FileSystem::MemoryFile.a_regular_file_containing(autosign, "one\n\n")) do
+                Puppet::Network::AuthStore.stubs(:new).returns store
+
+                store.expects(:allow).with("one")
+                @ca.autosign(csr)
+              end
+            end
+          end
+        end
+      end
+
+      describe "using the autosign command setting" do
+        let(:cmd) { File.expand_path('/autosign_cmd') }
+        let(:autosign_cmd) { mock 'autosign_command' }
+        let(:autosign_executable) { Puppet::FileSystem::MemoryFile.an_executable(cmd) }
+
+        before do
+          Puppet[:autosign] = cmd
+
+          Puppet::SSL::CertificateAuthority::AutosignCommand.stubs(:new).returns autosign_cmd
         end
 
-        it "should not sign CSRs whose hostname does not match the autosign configuration" do
-          csr1 = mock 'csr1'
-          csr2 = mock 'csr2'
-          Puppet::SSL::CertificateRequest.indirection.stubs(:search).returns [csr1, csr2]
+        it "autosigns the CSR if the autosign command returned true" do
+          Puppet::FileSystem.overlay(autosign_executable) do
+            autosign_cmd.expects(:allowed?).with(csr).returns true
+
+            @ca.expects(:sign).with('host')
+            @ca.autosign(csr)
+          end
+        end
+
+        it "doesn't autosign the CSR if the autosign_command returned false" do
+          Puppet::FileSystem.overlay(autosign_executable) do
+            autosign_cmd.expects(:allowed?).with(csr).returns false
+
+            @ca.expects(:sign).never
+            @ca.autosign(csr)
+          end
         end
       end
     end
@@ -698,28 +720,6 @@ describe Puppet::SSL::CertificateAuthority do
       @cacert = mock 'certificate'
       @cacert.stubs(:content).returns "cacertificate"
       @ca = Puppet::SSL::CertificateAuthority.new
-    end
-
-    it "should have a method for acting on the SSL files" do
-      @ca.should respond_to(:apply)
-    end
-
-    describe "when applying a method to a set of hosts" do
-      it "should fail if no subjects have been specified" do
-        expect { @ca.apply(:generate) }.to raise_error(ArgumentError)
-      end
-
-      it "should create an Interface instance with the specified method and the options" do
-        Puppet::SSL::CertificateAuthority::Interface.expects(:new).with(:generate, :to => :host).returns(stub('applier', :apply => nil))
-        @ca.apply(:generate, :to => :host)
-      end
-
-      it "should apply the Interface with itself as the argument" do
-        applier = stub('applier')
-        applier.expects(:apply).with(@ca)
-        Puppet::SSL::CertificateAuthority::Interface.expects(:new).returns applier
-        @ca.apply(:generate, :to => :ca_testing)
-      end
     end
 
     it "should be able to list waiting certificate requests" do
@@ -745,6 +745,13 @@ describe Puppet::SSL::CertificateAuthority do
       cert2 = stub 'cert2', :name => "cert2"
       Puppet::SSL::Certificate.indirection.expects(:search).with("*").returns [cert1, cert2]
       @ca.list.should == %w{cert1 cert2}
+    end
+
+    it "should list the full certificates" do
+      cert1 = stub 'cert1', :name => "cert1"
+      cert2 = stub 'cert2', :name => "cert2"
+      Puppet::SSL::Certificate.indirection.expects(:search).with("*").returns [cert1, cert2]
+      @ca.list_certificates.should == [cert1, cert2]
     end
 
     describe "and printing certificates" do
@@ -859,6 +866,35 @@ describe Puppet::SSL::CertificateAuthority do
 
         expect { @ca.verify("me") }.to raise_error
       end
+
+      describe "certificate_is_alive?" do
+        it "should return false if verification fails" do
+          @cert.expects(:content).returns "mycert"
+
+          @store.expects(:verify).with("mycert").returns false
+
+          @ca.certificate_is_alive?(@cert).should be_false
+        end
+
+        it "should return true if verification passes" do
+          @cert.expects(:content).returns "mycert"
+
+          @store.expects(:verify).with("mycert").returns true
+
+          @ca.certificate_is_alive?(@cert).should be_true
+        end
+
+        it "should used a cached instance of the x509 store" do
+          OpenSSL::X509::Store.stubs(:new).returns(@store).once
+
+          @cert.expects(:content).returns "mycert"
+
+          @store.expects(:verify).with("mycert").returns true
+
+          @ca.certificate_is_alive?(@cert)
+          @ca.certificate_is_alive?(@cert)
+        end
+      end
     end
 
     describe "and revoking certificates" do
@@ -900,10 +936,34 @@ describe Puppet::SSL::CertificateAuthority do
         cert = stub 'cert', :content => real_cert
         Puppet::SSL::Certificate.indirection.expects(:find).with("host").returns nil
 
-        @ca.inventory.expects(:serial).with("host").returns 16
+        @ca.inventory.expects(:serials).with("host").returns [16]
 
         @ca.crl.expects(:revoke).with { |serial, key| serial == 16 }
         @ca.revoke('host')
+      end
+
+      it "should revoke all serials matching a name" do
+        real_cert = stub 'real_cert', :serial => 15
+        cert = stub 'cert', :content => real_cert
+        Puppet::SSL::Certificate.indirection.expects(:find).with("host").returns nil
+
+        @ca.inventory.expects(:serials).with("host").returns [16, 20, 25]
+
+        @ca.crl.expects(:revoke).with { |serial, key| serial == 16 }
+        @ca.crl.expects(:revoke).with { |serial, key| serial == 20 }
+        @ca.crl.expects(:revoke).with { |serial, key| serial == 25 }
+        @ca.revoke('host')
+      end
+
+      it "should raise an error if no certificate match" do
+        real_cert = stub 'real_cert', :serial => 15
+        cert = stub 'cert', :content => real_cert
+        Puppet::SSL::Certificate.indirection.expects(:find).with("host").returns nil
+
+        @ca.inventory.expects(:serials).with("host").returns []
+
+        @ca.crl.expects(:revoke).never
+        expect { @ca.revoke('host') }.to raise_error
       end
 
       context "revocation by serial number (#16798)" do
@@ -923,7 +983,9 @@ describe Puppet::SSL::CertificateAuthority do
 
         it "handles very large serial numbers" do
           bighex = '0x4000000000000000000000000000000000000000'
-          @ca.crl.expects(:revoke).with { |serial, key| serial == 2**(159-1) }
+          bighex_int = 365375409332725729550921208179070754913983135744
+
+          @ca.crl.expects(:revoke).with(bighex_int, anything)
           Puppet::SSL::Certificate.indirection.expects(:find).with(bighex).returns nil
 
           @ca.revoke(bighex)
@@ -934,38 +996,135 @@ describe Puppet::SSL::CertificateAuthority do
     it "should be able to generate a complete new SSL host" do
       @ca.should respond_to(:generate)
     end
+  end
+end
 
-    describe "and generating certificates" do
-      before do
-        @host = stub 'host', :generate_certificate_request => nil
-        Puppet::SSL::Host.stubs(:new).returns @host
-        Puppet::SSL::Certificate.indirection.stubs(:find).returns nil
+require 'puppet/indirector/memory'
 
-        @ca.stubs(:sign)
-      end
+module CertificateAuthorityGenerateSpecs
+describe "CertificateAuthority.generate" do
 
-      it "should fail if a certificate already exists for the host" do
-        Puppet::SSL::Certificate.indirection.expects(:find).with("him").returns "something"
+  def expect_to_increment_serial_file
+    Puppet.settings.setting(:serial).expects(:exclusive_open)
+  end
 
-        expect { @ca.generate("him") }.to raise_error(ArgumentError)
-      end
+  def expect_to_sign_a_cert
+    expect_to_increment_serial_file
+  end
 
-      it "should create a new Host instance with the correct name" do
-        Puppet::SSL::Host.expects(:new).with("him").returns @host
+  def expect_to_write_the_ca_password
+    Puppet.settings.setting(:capass).expects(:open).with('w')
+  end
 
-        @ca.generate("him")
-      end
+  def expect_ca_initialization
+    expect_to_write_the_ca_password
+    expect_to_sign_a_cert
+  end
 
-      it "should use the Host to generate the certificate request" do
-        @host.expects :generate_certificate_request
+  INDIRECTED_CLASSES = [
+    Puppet::SSL::Certificate,
+    Puppet::SSL::CertificateRequest,
+    Puppet::SSL::CertificateRevocationList,
+    Puppet::SSL::Key,
+  ]
 
-        @ca.generate("him")
-      end
+  INDIRECTED_CLASSES.each do |const|
+    class const::Memory < Puppet::Indirector::Memory
 
-      it "should sign the generated request" do
-        @ca.expects(:sign).with("him", false)
-        @ca.generate("him")
+      # @return Array of all the indirector's values
+      #
+      # This mirrors Puppet::Indirector::SslFile#search which returns all files
+      # in the directory.
+      def search(request)
+        return @instances.values
       end
     end
   end
+
+  before do
+    Puppet::SSL::Inventory.stubs(:new).returns(stub("Inventory", :add => nil))
+    INDIRECTED_CLASSES.each { |const| const.indirection.terminus_class = :memory }
+  end
+
+  after do
+    INDIRECTED_CLASSES.each do |const|
+      const.indirection.terminus_class = :file
+      const.indirection.termini.clear
+    end
+  end
+
+  describe "when generating certificates" do
+    let(:ca) { Puppet::SSL::CertificateAuthority.new }
+
+    before do
+      expect_ca_initialization
+    end
+
+    it "should fail if a certificate already exists for the host" do
+      cert = Puppet::SSL::Certificate.new('pre.existing')
+      Puppet::SSL::Certificate.indirection.save(cert)
+      expect { ca.generate(cert.name) }.to raise_error(ArgumentError, /a certificate already exists/i)
+    end
+
+    describe "that do not yet exist" do
+      let(:cn) { "new.host" }
+
+      def expect_cert_does_not_exist(cn)
+        expect( Puppet::SSL::Certificate.indirection.find(cn) ).to be_nil
+      end
+
+      before do
+        expect_to_sign_a_cert
+        expect_cert_does_not_exist(cn)
+      end
+
+      it "should return the created certificate" do
+        cert = ca.generate(cn)
+        expect( cert ).to be_kind_of(Puppet::SSL::Certificate)
+        expect( cert.name ).to eq(cn)
+      end
+
+      it "should not have any subject_alt_names by default" do
+        cert = ca.generate(cn)
+        expect( cert.subject_alt_names ).to be_empty
+      end
+
+      it "should have subject_alt_names if passed dns_alt_names" do
+        cert = ca.generate(cn, :dns_alt_names => 'foo,bar')
+        expect( cert.subject_alt_names ).to match_array(["DNS:#{cn}",'DNS:foo','DNS:bar'])
+      end
+
+      context "if autosign is false" do
+        before do
+          Puppet[:autosign] = false
+        end
+
+        it "should still generate and explicitly sign the request" do
+          cert = nil
+          cert = ca.generate(cn)
+          expect(cert.name).to eq(cn)
+        end
+      end
+
+      context "if autosign is true (Redmine #6112)" do
+
+        def run_mode_must_be_master_for_autosign_to_be_attempted
+          Puppet.stubs(:run_mode).returns(Puppet::Util::RunMode[:master])
+        end
+
+        before do
+          Puppet[:autosign] = true
+          run_mode_must_be_master_for_autosign_to_be_attempted
+          Puppet::Util::Log.level = :info
+        end
+
+        it "should generate a cert without attempting to sign again" do
+          cert = ca.generate(cn)
+          expect(cert.name).to eq(cn)
+          expect(@logs.map(&:message)).to include("Autosigning #{cn}")
+        end
+      end
+    end
+  end
+end
 end

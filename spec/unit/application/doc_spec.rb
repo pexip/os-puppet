@@ -13,7 +13,7 @@ describe Puppet::Application::Doc do
     Puppet::Util::Log.stubs(:newdestination)
   end
 
-  it "should declare a other command" do
+  it "should declare an other command" do
     @doc.should respond_to(:other)
   end
 
@@ -143,6 +143,61 @@ describe Puppet::Application::Doc do
       @doc.setup
     end
 
+    describe "configuring logging" do
+      before :each do
+        Puppet::Util::Log.stubs(:newdestination)
+      end
+
+      describe "with --debug" do
+        before do
+          @doc.options[:debug] = true
+        end
+
+        it "should set log level to debug" do
+          @doc.setup
+          Puppet::Util::Log.level.should == :debug
+        end
+
+        it "should set log destination to console" do
+          Puppet::Util::Log.expects(:newdestination).with(:console)
+          @doc.setup
+        end
+      end
+
+      describe "with --verbose" do
+        before do
+          @doc.options[:verbose] = true
+        end
+
+        it "should set log level to info" do
+          @doc.setup
+          Puppet::Util::Log.level.should == :info
+        end
+
+        it "should set log destination to console" do
+          Puppet::Util::Log.expects(:newdestination).with(:console)
+          @doc.setup
+        end
+      end
+
+      describe "without --debug or --verbose" do
+        before do
+          @doc.options[:debug] = false
+          @doc.options[:verbose] = false
+        end
+
+        it "should set log level to warning" do
+          @doc.setup
+          Puppet::Util::Log.level.should == :warning
+        end
+
+        it "should set log destination to console" do
+          Puppet::Util::Log.expects(:newdestination).with(:console)
+          @doc.setup
+        end
+      end
+    end
+
     describe "in non-rdoc mode" do
       it "should get all non-dynamic reference if --all" do
         @doc.options[:all] = true
@@ -163,27 +218,23 @@ describe Puppet::Application::Doc do
     end
 
     describe "in rdoc mode" do
-      before :each do
-        Puppet::Util::Log.stubs(:newdestination)
-      end
-
       describe "when there are unknown args" do
         it "should expand --modulepath if any" do
           @doc.unknown_args = [ { :opt => "--modulepath", :arg => "path" } ]
           Puppet.settings.stubs(:handlearg)
 
-          File.expects(:expand_path).with("path")
-
           @doc.setup_rdoc
+
+          @doc.unknown_args[0][:arg].should == File.expand_path('path')
         end
 
         it "should expand --manifestdir if any" do
           @doc.unknown_args = [ { :opt => "--manifestdir", :arg => "path" } ]
           Puppet.settings.stubs(:handlearg)
 
-          File.expects(:expand_path).with("path")
-
           @doc.setup_rdoc
+
+          @doc.unknown_args[0][:arg].should == File.expand_path('path')
         end
 
         it "should give them to Puppet.settings" do
@@ -199,50 +250,22 @@ describe Puppet::Application::Doc do
 
         @doc.setup_rdoc
       end
-
-      it "should set log level to debug if --debug" do
-        @doc.options[:debug] = true
-        @doc.setup_rdoc
-        Puppet::Util::Log.level.should == :debug
-      end
-
-      it "should set log level to info if --verbose" do
-        @doc.options[:verbose] = true
-        @doc.setup_rdoc
-        Puppet::Util::Log.level.should == :info
-      end
-
-      it "should set log destination to console if --verbose" do
-        @doc.options[:verbose] = true
-
-        Puppet::Util::Log.expects(:newdestination).with(:console)
-
-        @doc.setup_rdoc
-      end
-
-      it "should set log destination to console if --debug" do
-        @doc.options[:debug] = true
-
-        Puppet::Util::Log.expects(:newdestination).with(:console)
-
-        @doc.setup_rdoc
-      end
     end
   end
 
   describe "when running" do
     describe "in rdoc mode" do
-      let(:modules) { File.expand_path("modules") }
-      let(:manifests) { File.expand_path("manifests") }
+      include PuppetSpec::Files
+
+      let(:envdir) { tmpdir('env') }
+      let(:modules) { File.join(envdir, "modules") }
+      let(:modules2) { File.join(envdir, "modules2") }
+      let(:manifests) { File.join(envdir, "manifests") }
 
       before :each do
         @doc.manifest = false
         Puppet.stubs(:info)
         Puppet[:trace] = false
-        @env = stub 'env'
-        @env.stubs(:modulepath).returns([modules])
-        @env.stubs(:[]).with(:manifest).returns('manifests/site.pp')
-        Puppet::Node::Environment.stubs(:new).returns(@env)
         Puppet[:modulepath] = modules
         Puppet[:manifestdir] = manifests
         @doc.options[:all] = false
@@ -253,43 +276,54 @@ describe Puppet::Application::Doc do
         @doc.command_line.stubs(:args).returns([])
       end
 
+      around(:each) do |example|
+        FileUtils.mkdir_p(modules)
+        env = Puppet::Node::Environment.create(Puppet[:environment].to_sym, [modules], "#{manifests}/site.pp")
+        Puppet.override({:environments => Puppet::Environments::Static.new(env), :current_environment => env}) do
+          example.run
+        end
+      end
+
       it "should set document_all on --all" do
         @doc.options[:all] = true
         Puppet.settings.expects(:[]=).with(:document_all, true)
 
-        expect { @doc.rdoc }.to exit_with 0
+        expect { @doc.rdoc }.to exit_with(0)
       end
 
       it "should call Puppet::Util::RDoc.rdoc in full mode" do
-        Puppet::Util::RDoc.expects(:rdoc).with('doc', [modules, 'manifests'], nil)
-        expect { @doc.rdoc }.to exit_with 0
+        Puppet::Util::RDoc.expects(:rdoc).with('doc', [modules, manifests], nil)
+        expect { @doc.rdoc }.to exit_with(0)
       end
 
       it "should call Puppet::Util::RDoc.rdoc with a charset if --charset has been provided" do
         @doc.options[:charset] = 'utf-8'
-        Puppet::Util::RDoc.expects(:rdoc).with('doc', [modules, 'manifests'], "utf-8")
-        expect { @doc.rdoc }.to exit_with 0
+        Puppet::Util::RDoc.expects(:rdoc).with('doc', [modules, manifests], "utf-8")
+        expect { @doc.rdoc }.to exit_with(0)
       end
 
       it "should call Puppet::Util::RDoc.rdoc in full mode with outputdir set to doc if no --outputdir" do
         @doc.options[:outputdir] = false
-        Puppet::Util::RDoc.expects(:rdoc).with('doc', [modules, 'manifests'], nil)
-        expect { @doc.rdoc }.to exit_with 0
+        Puppet::Util::RDoc.expects(:rdoc).with('doc', [modules, manifests], nil)
+        expect { @doc.rdoc }.to exit_with(0)
       end
 
       it "should call Puppet::Util::RDoc.manifestdoc in manifest mode" do
         @doc.manifest = true
         Puppet::Util::RDoc.expects(:manifestdoc)
-        expect { @doc.rdoc }.to exit_with 0
+        expect { @doc.rdoc }.to exit_with(0)
       end
 
       it "should get modulepath and manifestdir values from the environment" do
-        @env.expects(:modulepath).returns(['envmodules1','envmodules2'])
-        @env.expects(:[]).with(:manifest).returns('envmanifests/site.pp')
-
-        Puppet::Util::RDoc.expects(:rdoc).with('doc', ['envmodules1','envmodules2','envmanifests'], nil)
-
-        expect { @doc.rdoc }.to exit_with 0
+        FileUtils.mkdir_p(modules)
+        FileUtils.mkdir_p(modules2)
+        env = Puppet::Node::Environment.create(Puppet[:environment].to_sym,
+          [modules, modules2],
+          "envmanifests/site.pp")
+        Puppet.override({:environments => Puppet::Environments::Static.new(env), :current_environment => env}) do
+           Puppet::Util::RDoc.stubs(:rdoc).with('doc', [modules.to_s, modules2.to_s, env.manifest.to_s], nil)
+          expect { @doc.rdoc }.to exit_with(0)
+        end
       end
     end
 

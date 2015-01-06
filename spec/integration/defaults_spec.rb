@@ -5,6 +5,26 @@ require 'puppet/defaults'
 require 'puppet/rails'
 
 describe "Puppet defaults" do
+
+  describe "when default_manifest is set" do
+    it "returns ./manifests by default" do
+      expect(Puppet[:default_manifest]).to eq('./manifests')
+    end
+  end
+
+  describe "when disable_per_environment_manifest is set" do
+    it "returns false by default" do
+      expect(Puppet[:disable_per_environment_manifest]).to eq(false)
+    end
+
+    it "errors when set to true and default_manifest is not an absolute path" do
+      expect {
+        Puppet[:default_manifest] = './some/relative/manifest.pp'
+        Puppet[:disable_per_environment_manifest] = true
+      }.to raise_error Puppet::Settings::ValidationError, /'default_manifest' setting must be.*absolute/
+    end
+  end
+
   describe "when setting the :factpath" do
     it "should add the :factpath to Facter's search paths" do
       Facter.expects(:search).with("/my/fact/path")
@@ -90,12 +110,6 @@ describe "Puppet defaults" do
     Puppet.settings.stubs(:service_group_available?).returns true
     Puppet.settings.setting(:yamldir).owner.should == Puppet.settings[:user]
     Puppet.settings.setting(:yamldir).group.should == Puppet.settings[:group]
-  end
-
-  # See #1232
-  it "should not specify a user or group for the rundir" do
-    Puppet.settings.setting(:rundir).owner.should be_nil
-    Puppet.settings.setting(:rundir).group.should be_nil
   end
 
   it "should specify that the host private key should be owned by the service user" do

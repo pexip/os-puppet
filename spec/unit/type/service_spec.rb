@@ -49,47 +49,60 @@ describe Puppet::Type.type(:service), "when validating attribute values" do
     svc.should(:ensure).should == :stopped
   end
 
-  it "should support :true as a value to :enable" do
-    Puppet::Type.type(:service).new(:name => "yay", :enable => :true)
-  end
+  describe "the enable property" do
+    before :each do
+      @provider.class.stubs(:supports_parameter?).returns true
+    end
+    it "should support :true as a value" do
+      srv = Puppet::Type.type(:service).new(:name => "yay", :enable => :true)
+      srv.should(:enable).should == :true
+    end
 
-  it "should support :false as a value to :enable" do
-    Puppet::Type.type(:service).new(:name => "yay", :enable => :false)
-  end
+    it "should support :false as a value" do
+      srv = Puppet::Type.type(:service).new(:name => "yay", :enable => :false)
+      srv.should(:enable).should == :false
+    end
 
-  it "should support :manual as a value to :enable on Windows" do
-    Puppet.features.stubs(:microsoft_windows?).returns true
+    it "should support :manual as a value on Windows" do
+      Puppet.features.stubs(:microsoft_windows?).returns true
 
-    Puppet::Type.type(:service).new(:name => "yay", :enable => :manual)
-  end
+      srv = Puppet::Type.type(:service).new(:name => "yay", :enable => :manual)
+      srv.should(:enable).should == :manual
+    end
 
-  it "should not support :manual as a value to :enable when not on Windows" do
-    Puppet.features.stubs(:microsoft_windows?).returns false
+    it "should not support :manual as a value when not on Windows" do
+      Puppet.features.stubs(:microsoft_windows?).returns false
 
-    expect { Puppet::Type.type(:service).new(:name => "yay", :enable => :manual) }.to raise_error(
-      Puppet::Error,
-      /Setting enable to manual is only supported on Microsoft Windows\./
-    )
+      expect { Puppet::Type.type(:service).new(:name => "yay", :enable => :manual) }.to raise_error(
+        Puppet::Error,
+        /Setting enable to manual is only supported on Microsoft Windows\./
+      )
+    end
   end
 
   it "should support :true as a value to :hasstatus" do
-    Puppet::Type.type(:service).new(:name => "yay", :hasstatus => :true)
+    srv = Puppet::Type.type(:service).new(:name => "yay", :hasstatus => :true)
+    srv[:hasstatus].should == :true
   end
 
   it "should support :false as a value to :hasstatus" do
-    Puppet::Type.type(:service).new(:name => "yay", :hasstatus => :false)
+    srv = Puppet::Type.type(:service).new(:name => "yay", :hasstatus => :false)
+    srv[:hasstatus].should == :false
   end
 
   it "should specify :true as the default value of hasstatus" do
-    Puppet::Type.type(:service).new(:name => "yay")[:hasstatus].should == :true
+    srv = Puppet::Type.type(:service).new(:name => "yay")
+    srv[:hasstatus].should == :true
   end
 
   it "should support :true as a value to :hasrestart" do
-    Puppet::Type.type(:service).new(:name => "yay", :hasrestart => :true)
+    srv = Puppet::Type.type(:service).new(:name => "yay", :hasrestart => :true)
+    srv[:hasrestart].should == :true
   end
 
   it "should support :false as a value to :hasrestart" do
-    Puppet::Type.type(:service).new(:name => "yay", :hasrestart => :false)
+    srv = Puppet::Type.type(:service).new(:name => "yay", :hasrestart => :false)
+    srv[:hasrestart].should == :false
   end
 
   it "should allow setting the :enable parameter if the provider has the :enableable feature" do
@@ -107,14 +120,14 @@ describe Puppet::Type.type(:service), "when validating attribute values" do
   end
 
   it "should split paths on '#{File::PATH_SEPARATOR}'" do
-    FileTest.stubs(:exist?).returns(true)
+    Puppet::FileSystem.stubs(:exist?).returns(true)
     FileTest.stubs(:directory?).returns(true)
     svc = Puppet::Type.type(:service).new(:name => "yay", :path => "/one/two#{File::PATH_SEPARATOR}/three/four")
     svc[:path].should == %w{/one/two /three/four}
   end
 
   it "should accept arrays of paths joined by '#{File::PATH_SEPARATOR}'" do
-    FileTest.stubs(:exist?).returns(true)
+    Puppet::FileSystem.stubs(:exist?).returns(true)
     FileTest.stubs(:directory?).returns(true)
     svc = Puppet::Type.type(:service).new(:name => "yay", :path => ["/one#{File::PATH_SEPARATOR}/two", "/three#{File::PATH_SEPARATOR}/four"])
     svc[:path].should == %w{/one /two /three /four}
@@ -124,7 +137,7 @@ end
 describe Puppet::Type.type(:service), "when setting default attribute values" do
   it "should default to the provider's default path if one is available" do
     FileTest.stubs(:directory?).returns(true)
-    FileTest.stubs(:exist?).returns(true)
+    Puppet::FileSystem.stubs(:exist?).returns(true)
 
     Puppet::Type.type(:service).defaultprovider.stubs(:respond_to?).returns(true)
     Puppet::Type.type(:service).defaultprovider.stubs(:defpath).returns("testing")

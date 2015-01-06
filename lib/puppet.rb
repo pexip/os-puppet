@@ -1,6 +1,8 @@
 require 'puppet/version'
 
 # see the bottom of the file for further inclusions
+# Also see the new Vendor support - towards the end
+#
 require 'facter'
 require 'puppet/error'
 require 'puppet/util'
@@ -25,6 +27,10 @@ require 'puppet/external/pson/pure'
 #
 # @api public
 module Puppet
+  require 'puppet/file_system'
+  require 'puppet/context'
+  require 'puppet/environments'
+
   class << self
     include Puppet::Util
     attr_reader :features
@@ -33,6 +39,27 @@ module Puppet
 
   # the hash that determines how our system behaves
   @@settings = Puppet::Settings.new
+
+  # Note: It's important that these accessors (`self.settings`, `self.[]`) are
+  # defined before we try to load any "features" (which happens a few lines below),
+  # because the implementation of the features loading may examine the values of
+  # settings.
+  def self.settings
+    @@settings
+  end
+
+  # Get the value for a setting
+  #
+  # @param [Symbol] param the setting to retrieve
+  #
+  # @api public
+  def self.[](param)
+    if param == :debug
+      return Puppet::Util::Log.level == :debug
+    else
+      return @@settings[param]
+    end
+  end
 
   # The services running in this process.
   @services ||= []
@@ -52,20 +79,7 @@ module Puppet
     @@settings.define_settings(section, hash)
   end
 
-  # Get the value for a setting
-  #
-  # @param [Symbol] param the setting to retrieve
-  #
-  # @api public
-  def self.[](param)
-    if param == :debug
-      return Puppet::Util::Log.level == :debug
-    else
-      return @@settings[param]
-    end
-  end
-
-  # configuration parameter access and stuff
+  # setting access and stuff
   def self.[]=(param,value)
     @@settings[param] = value
   end
@@ -82,11 +96,6 @@ module Puppet
     end
   end
 
-  def self.settings
-    @@settings
-  end
-
-
   def self.run_mode
     # This sucks (the existence of this method); there are a lot of places in our code that branch based the value of
     # "run mode", but there used to be some really confusing code paths that made it almost impossible to determine
@@ -101,7 +110,7 @@ module Puppet
     Puppet::Util::RunMode[@@settings.preferred_run_mode]
   end
 
-  # Load all of the configuration parameters.
+  # Load all of the settings.
   require 'puppet/defaults'
 
   def self.genmanifest
@@ -112,7 +121,7 @@ module Puppet
   end
 
   # Parse the config file for this process.
-  # @deprecated Use {#initialize_settings}
+  # @deprecated Use {initialize_settings}
   def self.parse_config()
     Puppet.deprecation_warning("Puppet.parse_config is deprecated; please use Faces API (which will handle settings and state management for you), or (less desirable) call Puppet.initialize_settings")
     Puppet.initialize_settings
@@ -132,7 +141,7 @@ module Puppet
 
   # Initialize puppet's settings for a specified run_mode.
   #
-  # @deprecated Use {#initialize_settings}
+  # @deprecated Use {initialize_settings}
   def self.initialize_settings_for_run_mode(run_mode)
     Puppet.deprecation_warning("initialize_settings_for_run_mode may be removed in a future release, as may run_mode itself")
     do_initialize_settings_for_run_mode(run_mode, [])
@@ -144,6 +153,9 @@ module Puppet
     Puppet.settings.initialize_global_settings(args)
     run_mode = Puppet::Util::RunMode[run_mode]
     Puppet.settings.initialize_app_defaults(Puppet::Settings.app_defaults_for_run_mode(run_mode))
+    Puppet.push_context(Puppet.base_context(Puppet.settings), "Initial context after settings initialization")
+    Puppet::Parser::Functions.reset
+    Puppet::Util::Log.level = Puppet[:log_level]
   end
   private_class_method :do_initialize_settings_for_run_mode
 
@@ -153,15 +165,109 @@ module Puppet
   def self.newtype(name, options = {}, &block)
     Puppet::Type.newtype(name, options, &block)
   end
+
+  # Load vendored (setup paths, and load what is needed upfront).
+  # See the Vendor class for how to add additional vendored gems/code
+  require "puppet/vendor"
+  Puppet::Vendor.load_vendored
+
+  # Set default for YAML.load to unsafe so we don't affect programs
+  # requiring puppet -- in puppet we will call safe explicitly
+  SafeYAML::OPTIONS[:default_mode] = :unsafe
+
+  # The bindings used for initialization of puppet
+  # @api private
+  def self.base_context(settings)
+    environments = settings[:environmentpath]
+    modulepath = Puppet::Node::Environment.split_path(settings[:basemodulepath])
+
+    if environments.empty?
+      loaders = [Puppet::Environments::Legacy.new]
+    else
+      loaders = Puppet::Environments::Directories.from_path(environments, modulepath)
+      # in case the configured environment (used for the default sometimes)
+      # doesn't exist
+      default_environment = Puppet[:environment].to_sym
+      if default_environment == :production
+        loaders << Puppet::Environments::StaticPrivate.new(
+          Puppet::Node::Environment.create(Puppet[:environment].to_sym,
+                                           [],
+                                           Puppet::Node::Environment::NO_MANIFEST))
+      end
+    end
+
+    {
+      :environments => Puppet::Environments::Cached.new(*loaders),
+      :http_pool => proc {
+        require 'puppet/network/http'
+        Puppet::Network::HTTP::NoCachePool.new
+      }
+    }
+  end
+
+  # A simple set of bindings that is just enough to limp along to
+  # initialization where the {base_context} bindings are put in place
+  # @api private
+  def self.bootstrap_context
+    root_environment = Puppet::Node::Environment.create(:'*root*', [], Puppet::Node::Environment::NO_MANIFEST)
+    {
+      :current_environment => root_environment,
+      :root_environment => root_environment
+    }
+  end
+
+  # @param overrides [Hash] A hash of bindings to be merged with the parent context.
+  # @param description [String] A description of the context.
+  # @api private
+  def self.push_context(overrides, description = "")
+    @context.push(overrides, description)
+  end
+
+  # Return to the previous context.
+  # @raise [StackUnderflow] if the current context is the root
+  # @api private
+  def self.pop_context
+    @context.pop
+  end
+
+  # Lookup a binding by name or return a default value provided by a passed block (if given).
+  # @api private
+  def self.lookup(name, &block)
+    @context.lookup(name, &block)
+  end
+
+  # @param bindings [Hash] A hash of bindings to be merged with the parent context.
+  # @param description [String] A description of the context.
+  # @yield [] A block executed in the context of the temporarily pushed bindings.
+  # @api private
+  def self.override(bindings, description = "", &block)
+    @context.override(bindings, description, &block)
+  end
+
+  # @api private
+  def self.mark_context(name)
+    @context.mark(name)
+  end
+
+  # @api private
+  def self.rollback_context(name)
+    @context.rollback(name)
+  end
+
+  require 'puppet/node'
+
+  # The single instance used for normal operation
+  @context = Puppet::Context.new(bootstrap_context)
 end
 
 # This feels weird to me; I would really like for us to get to a state where there is never a "require" statement
 #  anywhere besides the very top of a file.  That would not be possible at the moment without a great deal of
 #  effort, but I think we should strive for it and revisit this at some point.  --cprice 2012-03-16
 
+require 'puppet/indirector'
 require 'puppet/type'
-require 'puppet/parser'
 require 'puppet/resource'
+require 'puppet/parser'
 require 'puppet/network'
 require 'puppet/ssl'
 require 'puppet/module'

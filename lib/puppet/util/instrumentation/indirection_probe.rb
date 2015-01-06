@@ -15,15 +15,27 @@ class Puppet::Util::Instrumentation::IndirectionProbe
     @probe_name = probe_name
   end
 
-  def to_pson(*args)
-    result = {
+  def to_data_hash
+    { :name => probe_name }
+  end
+
+  def to_pson_data_hash
+    {
       :document_type => "Puppet::Util::Instrumentation::IndirectionProbe",
-      :data => { :name => probe_name }
+      :data => to_data_hash,
     }
-    result.to_pson(*args)
+  end
+
+  def to_pson(*args)
+    to_pson_data_hash.to_pson(*args)
+  end
+
+  def self.from_data_hash(data)
+    self.new(data["name"])
   end
 
   def self.from_pson(data)
-    self.new(data["name"])
+    Puppet.deprecation_warning("from_pson is being removed in favour of from_data_hash.")
+    self.from_data_hash(data)
   end
 end

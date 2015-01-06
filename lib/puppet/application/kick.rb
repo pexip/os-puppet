@@ -9,6 +9,7 @@ class Puppet::Application::Kick < Puppet::Application
   option("--debug","-d")
   option("--ping","-P")
   option("--test")
+  option("--ignoreschedules")
 
   option("--host HOST") do |arg|
     @hosts << arg
@@ -101,9 +102,9 @@ about security settings.
 
 OPTIONS
 -------
-Note that any configuration parameter that's valid in the configuration
+Note that any setting that's valid in the configuration
 file is also a valid long argument. For example, 'ssldir' is a valid
-configuration parameter, so you can specify '--ssldir <directory>' as an
+setting, so you can specify '--ssldir <directory>' as an
 argument.
 
 See the configuration file documentation at
@@ -156,7 +157,7 @@ with '--genconfig'.
   option requires LDAP support at this point.
 
 * --ping:
-  Do a ICMP echo against the target host. Skip hosts that don't respond
+  Do an ICMP echo against the target host. Skip hosts that don't respond
   to ping.
 
 
@@ -239,7 +240,7 @@ Copyright (c) 2011 Puppet Labs, LLC Licensed under the Apache 2.0 License
 
   def run_for_host(host)
     if options[:ping]
-      out = %x{ping -c 1 #{host}}
+      %x{ping -c 1 #{host}}
       unless $CHILD_STATUS == 0
         $stderr.print "Could not contact #{host}\n"
         exit($CHILD_STATUS)

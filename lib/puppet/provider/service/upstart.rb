@@ -7,11 +7,14 @@ Puppet::Type.type(:service).provide :upstart, :parent => :debian do
 
   desc "Ubuntu service management with `upstart`.
 
-  This provider manages `upstart` jobs, which have replaced `initd` services
-  on Ubuntu. For `upstart` documentation, see <http://upstart.ubuntu.com/>.
+  This provider manages `upstart` jobs on Ubuntu. For `upstart` documentation,
+  see <http://upstart.ubuntu.com/>.
   "
-  # confine to :ubuntu for now because I haven't tested on other platforms
-  confine :operatingsystem => :ubuntu #[:ubuntu, :fedora, :debian]
+
+  confine :any => [
+    Facter.value(:operatingsystem) == 'Ubuntu',
+    (Facter.value(:osfamily) == 'RedHat' and Facter.value(:operatingsystemrelease) =~ /^6\./),
+  ]
 
   defaultfor :operatingsystem => :ubuntu
 
@@ -25,16 +28,21 @@ Puppet::Type.type(:service).provide :upstart, :parent => :debian do
   # http://www.linuxplanet.com/linuxplanet/tutorials/7033/2/
   has_feature :enableable
 
-  # 'wait-for-state' is excluded from instances here because it takes
-  # parameters that have unclear meaning. It looks like 'wait-for-state' is
-  # mainly used internally for other upstart services as a 'sleep until something happens'
-  # (http://lists.debian.org/debian-devel/2012/02/msg01139.html). There is an open launchpad bug
-  # (https://bugs.launchpad.net/ubuntu/+source/upstart/+bug/962047) that may
-  # eventually explain how to use this service or perhaps why it should remain
-  # excluded. When that bug is adddressed this should be reexamined.
   def self.instances
-    self.get_services(['wait-for-state'])
+    self.get_services(self.excludes) # Take exclude list from init provider
   end
+
+  def self.excludes
+    excludes = super
+    if Facter.value(:osfamily) == 'RedHat'
+      # Puppet cannot deal with services that have instances, so we have to
+      # ignore these services using instances on redhat based systems.
+      excludes += %w[serial tty]
+    end
+
+    excludes
+  end
+
 
   def self.get_services(exclude=[])
     instances = []
@@ -78,7 +86,7 @@ Puppet::Type.type(:service).provide :upstart, :parent => :debian do
       paths.each do |path|
         service_name = name.match(/^(\S+)/)[1]
         fqname = File.join(path, service_name + suffix)
-        if File.exists?(fqname)
+        if Puppet::FileSystem.exist?(fqname)
           return fqname
         end
 
@@ -155,7 +163,7 @@ Puppet::Type.type(:service).provide :upstart, :parent => :debian do
 
 private
   def is_upstart?(script = initscript)
-    File.exists?(script) && script.match(/\/etc\/init\/\S+\.conf/)
+    Puppet::FileSystem.exist?(script) && script.match(/\/etc\/init\/\S+\.conf/)
   end
 
   def version_is_pre_0_6_7
@@ -263,7 +271,7 @@ private
   end
 
   def read_override_file
-    if File.exists?(overscript)
+    if Puppet::FileSystem.exist?(overscript)
       read_script_from(overscript)
     else
       ""

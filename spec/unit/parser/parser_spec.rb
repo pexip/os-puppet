@@ -19,40 +19,38 @@ describe Puppet::Parser do
   end
 
   it "should set the environment" do
-    env = Puppet::Node::Environment.new
+    env = Puppet::Node::Environment.create(:testing, [])
     Puppet::Parser::Parser.new(env).environment.should == env
   end
 
-  it "should convert the environment into an environment instance if a string is provided" do
-    env = Puppet::Node::Environment.new("testing")
-    Puppet::Parser::Parser.new("testing").environment.should == env
-  end
-
   it "should be able to look up the environment-specific resource type collection" do
-    rtc = Puppet::Node::Environment.new("development").known_resource_types
-    parser = Puppet::Parser::Parser.new "development"
+    env = Puppet::Node::Environment.create(:development, [])
+    rtc = env.known_resource_types
+    parser = Puppet::Parser::Parser.new env
     parser.known_resource_types.should equal(rtc)
   end
 
   context "when importing" do
-    it "should delegate importing to the known resource type loader" do
-      parser = Puppet::Parser::Parser.new "development"
-      parser.known_resource_types.loader.expects(:import).with("newfile", "current_file")
-      parser.lexer.expects(:file).returns "current_file"
-      parser.import("newfile")
+    it "uses the directory of the currently parsed file" do
+      @parser.lexer.stubs(:file).returns "/tmp/current_file"
+
+      @parser.known_resource_types.loader.expects(:import).with("newfile", "/tmp")
+
+      @parser.import("newfile")
     end
 
-    it "should import multiple files on one line" do
-      @parser.known_resource_types.loader.expects(:import).with('one', nil)
-      @parser.known_resource_types.loader.expects(:import).with('two', nil)
+    it "uses the current working directory, when there is no file being parsed" do
+      @parser.known_resource_types.loader.expects(:import).with('one', Dir.pwd)
+      @parser.known_resource_types.loader.expects(:import).with('two', Dir.pwd)
+
       @parser.parse("import 'one', 'two'")
     end
   end
 
   describe "when parsing files" do
     before do
-      FileTest.stubs(:exist?).returns true
-      File.stubs(:read).returns ""
+      Puppet::FileSystem.stubs(:exist?).returns true
+      Puppet::FileSystem.stubs(:read).returns ""
       @parser.stubs(:watch_file)
     end
 
@@ -100,11 +98,11 @@ describe Puppet::Parser do
       Puppet::Parser::AST::Not.expects(:new).with { |h| h[:value].is_a?(Puppet::Parser::AST::Boolean) }
       @parser.parse("unless false { $var = 1 }")
     end
-    
+
     it "should not raise an error with empty statements" do
       expect { @parser.parse("unless false { }") }.to_not raise_error
     end
-    
+
     #test for bug #13296
     it "should not override 'unless' as a parameter inside resources" do
       lambda { @parser.parse("exec {'/bin/echo foo': unless => '/usr/bin/false',}") }.should_not raise_error
@@ -525,5 +523,13 @@ describe Puppet::Parser do
     @parser.known_resource_types.import_ast(@parser.parse("define funtest {}"), '')
     @parser.known_resource_types.hostclass('funtest').
       should == @parser.find_hostclass("", "fUntEst")
+  end
+
+  context "deprecations" do
+    it "should flag use of import as deprecated" do
+      Puppet.expects(:deprecation_warning).once
+      @parser.known_resource_types.loader.expects(:import).with('foo', Dir.pwd)
+      @parser.parse("import 'foo'")
+    end
   end
 end

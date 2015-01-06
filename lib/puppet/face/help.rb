@@ -88,12 +88,13 @@ Puppet::Face.define(:help, '0.0.1') do
     begin
       face = Puppet::Face[facename.to_sym, version]
     rescue Puppet::Error => detail
-      fail ArgumentError, <<-MSG
+      msg = <<-MSG
 Could not load help for the face #{facename}.
 Please check the error logs for more information.
 
 Detail: "#{detail.message}"
       MSG
+      fail ArgumentError, msg, detail.backtrace
     end
     if actionname
       action = face.get_action(actionname.to_sym)
@@ -129,7 +130,7 @@ Detail: "#{detail.message}"
 
   # Return a list of all applications (both legacy and Face applications), along with a summary
   #  of their functionality.
-  # @returns [Array] An Array of Arrays.  The outer array contains one entry per application; each
+  # @return [Array] An Array of Arrays.  The outer array contains one entry per application; each
   #  element in the outer array is a pair whose first element is a String containing the application
   #  name, and whose second element is a String containing the summary for that application.
   def all_application_summaries()
@@ -140,7 +141,7 @@ Detail: "#{detail.message}"
         begin
           face = Puppet::Face[appname, :current]
           result << [appname, face.summary]
-        rescue Puppet::Error => detail
+        rescue Puppet::Error
           result << [ "! #{appname}", "! Subcommand unavailable due to error. Check error logs." ]
         end
       else
