@@ -1,26 +1,19 @@
 diff --git a/ext/rack/files/apache2.conf b/ext/rack/files/apache2.conf
 index 59bbd15..7438814 100644
---- a/ext/rack/files/apache2.conf
-+++ b/ext/rack/files/apache2.conf
-@@ -5,15 +5,13 @@ PassengerMaxPoolSize 12
- PassengerPoolIdleTime 1500
- # PassengerMaxRequests 1000
- PassengerStatThrottleRate 120
--RackAutoDetect Off
--RailsAutoDetect Off
- 
- Listen 8140
+--- a/ext/rack/example-passenger-vhost.conf
++++ b/ext/rack/example-passenger-vhost.conf
+@@ -18,8 +18,8 @@ PassengerMaxPoolSize 12
  
  <VirtualHost *:8140>
          SSLEngine on
--        SSLProtocol -ALL +SSLv3 +TLSv1
--        SSLCipherSuite ALL:!ADH:RC4+RSA:+HIGH:+MEDIUM:-LOW:-SSLv2:-EXP
+-        SSLProtocol             ALL -SSLv2 -SSLv3
+-        SSLCipherSuite          EDH+CAMELLIA:EDH+aRSA:EECDH+aRSA+AESGCM:EECDH+aRSA+SHA384:EECDH+aRSA+SHA256:EECDH:+CAMELLIA256:+AES256:+CAMELLIA128:+AES128:+SSLv3:!aNULL:!eNULL:!LOW:!3DES:!MD5:!EXP:!PSK:!DSS:!RC4:!SEED:!IDEA:!ECDSA:kEDH:CAMELLIA256-SHA:AES256-SHA:CAMELLIA128-SHA:AES128-SHA
 +        SSLProtocol -ALL +TLSv1.1 +TLSv1.2
 +        SSLCipherSuite !eNULL:!aNULL:!EXP:!DES:!RC4:!RC2:!IDEA:!MD5:!ADH:ALL@STRENGTH
+         SSLHonorCipherOrder     on
  
          SSLCertificateFile      /etc/puppet/ssl/certs/squigley.namespace.at.pem
-         SSLCertificateKeyFile   /etc/puppet/ssl/private_keys/squigley.namespace.at.pem
-@@ -34,8 +34,10 @@ Listen 8140
+@@ -45,8 +45,10 @@ Listen 8140
          RequestHeader set X-Client-DN %{SSL_CLIENT_S_DN}e
          RequestHeader set X-Client-Verify %{SSL_CLIENT_VERIFY}e
  
