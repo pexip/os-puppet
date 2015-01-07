@@ -100,7 +100,7 @@ create_initial_puppetmaster_vhost() {
     # apache2 is configured and started since apache2 ssl configuration
     # uses the puppetmaster ssl files.
     if [ ! -e "$(puppet master --configprint hostcert)" ]; then
-        puppet cert generate $(puppet master --configprint certname)
+        exit 0
     fi
 
     # Setup apache2 configuration files
@@ -147,7 +147,12 @@ if [ "$1" = "configure" ]; then
     if [ "$2" = "" ]; then
         create_initial_puppetmaster_vhost
     else
-        update_existing_puppetmaster_vhost $2
+        APACHE2_SITE_FILE="/etc/apache2/sites-available/$(apache2_puppetmaster_sitename)"
+        if [ ! -e "$APACHE2_SITE_FILE" ]; then
+            create_initial_puppetmaster_vhost
+        else
+            update_existing_puppetmaster_vhost $2
+        fi
     fi
 
     # Fix CRL file on upgrade to use the CA crl file instead of the host crl.
