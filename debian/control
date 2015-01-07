@@ -38,7 +38,7 @@ Description: Centralized configuration management
 
 Package: puppet
 Architecture: all
-Depends: ${misc:Depends}, ruby | ruby-interpreter
+Depends: ${misc:Depends},  puppet-common (= ${binary:Version}), ruby | ruby-interpreter
 Recommends: rdoc
 Suggests: puppet-el, vim-puppet
 Conflicts: puppet-common (<< 3.3.0-1puppetlabs1)
