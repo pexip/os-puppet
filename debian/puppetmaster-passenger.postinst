@@ -49,6 +49,22 @@ update_vhost_for_passenger4() {
     fi
 }
 
+# Update an existing vhost definition for Passenger 4.0.0
+update_vhost_for_passenger4_upgrade() {
+    APACHE2_SITE_FILE="/etc/apache2/sites-available/$(apache2_puppetmaster_sitename)"
+
+    # Get passenger version from dpkg.
+    # This will end in tears…
+    passenger_version="$(dpkg-query --showformat='${Version}\n' --show libapache2-mod-passenger)"
+    if dpkg --compare-versions "$passenger_version" gt "4.0~"; then
+        sed -r \
+            -e "/RailsAutoDetect/d" \
+            -e "/RackAutoDetect/d" \
+            $APACHE2_SITE_FILE > $tempfile
+        mv $tempfile $APACHE2_SITE_FILE
+    fi
+}
+
 # In Apache 2.2, if either the SSLCARevocationFile or SSLCARevocationPath
 # directives were specified then the specified file(s) would be checked when
 # establishing an SSL connection. Apache 2.4+ the SSLCARevocationCheck directive
@@ -132,6 +148,7 @@ update_existing_puppetmaster_vhost() {
     if dpkg --compare-versions "${1}" lt "3.6.2~"; then
         update_vhost_for_apache24_upgrade
     fi
+    update_vhost_for_passenger4_upgrade
 }
 
 if [ "$1" = "configure" ]; then
