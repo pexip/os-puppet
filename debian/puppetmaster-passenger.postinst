@@ -57,6 +57,7 @@ update_vhost_for_passenger4_upgrade() {
     # This will end in tears…
     passenger_version="$(dpkg-query --showformat='${Version}\n' --show libapache2-mod-passenger)"
     if dpkg --compare-versions "$passenger_version" gt "4.0~"; then
+        tempfile=$(mktemp)
         sed -r \
             -e "/RailsAutoDetect/d" \
             -e "/RackAutoDetect/d" \
