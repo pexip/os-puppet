@@ -13,7 +13,7 @@ XS-Pexip-Upstream: http://apt.puppetlabs.com/ precise
 
 Package: puppet-common
 Architecture: all
-Depends: ${misc:Depends}, ruby | ruby-interpreter, libruby (>= 1:1.9.3.4), ruby-shadow | libshadow-ruby1.8, adduser, lsb-base, sysv-rc (>= 2.86) | file-rc, hiera (>= 1.0.0), facter (>= 1.7.0), libjson-ruby | ruby-json
+Depends: ${misc:Depends}, ruby | ruby-interpreter, libruby (>= 1:1.9.3.4), ruby-shadow, adduser, lsb-base, sysv-rc (>= 2.86) | file-rc, hiera (>= 1.0.0), facter (>= 1.7.0), libjson-ruby | ruby-json
 Recommends: lsb-release, debconf-utils
 Suggests: ruby-selinux | libselinux-ruby1.8, librrd-ruby1.9.1 | librrd-ruby1.8
 Breaks: puppet (<< 2.6.0~rc2-1), puppetmaster (<< 0.25.4-1)
