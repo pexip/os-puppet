@@ -1,3 +1,4 @@
 01-puppet-time.patch
 02-pexos.patch
 04-rack-conf.patch
+CVE-2017-2295.patch

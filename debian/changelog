@@ -1,3 +1,9 @@
+puppet (3.7.3-1puppetlabs1pexip5) pexip; urgency=low
+
+  * Backport fix for CVE-2017-2295
+
+ -- John-Mark Bell <jmb@pexip.com>  Mon, 05 Jun 2017 18:28:09 +0100
+
 puppet (3.7.3-1puppetlabs1pexip4) pexip; urgency=low
 
   * Drop support for augeas: not needed
