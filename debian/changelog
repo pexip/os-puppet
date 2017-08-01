@@ -1,3 +1,9 @@
+puppet (3.7.3-1puppetlabs1pexip6) pexip; urgency=low
+
+  * Include fix for Pexip utf-8 issue #10318
+
+ -- Ben Hockley <ben@pexip.com>  Tue, 01 Aug 2017 12:43:27 +0100
+
 puppet (3.7.3-1puppetlabs1pexip5) pexip; urgency=low
 
   * Backport fix for CVE-2017-2295

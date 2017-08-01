@@ -29,6 +29,9 @@ ARGV << "--vardir"  << "/var/lib/puppet"
 #
 # --cprice 2012-05-22
 
+# Fix utf8-handling: https://github.com/pexip/mcu/issues/10318
+Encoding.default_external = Encoding::UTF_8
+
 require 'puppet/util/command_line'
 # we're usually running inside a Rack::Builder.new {} block,
 # therefore we need to call run *here*.
