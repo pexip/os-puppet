@@ -2,3 +2,4 @@
 02-pexos.patch
 04-rack-conf.patch
 CVE-2017-2295.patch
+06-fix-utf8-bug-10318.patch

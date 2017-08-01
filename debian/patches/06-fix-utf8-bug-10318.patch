@@ -1,0 +1,26 @@
+From 42237fda7d49b79602171c85d72adbbcf22a3ff4 Mon Sep 17 00:00:00 2001
+From: Ben Hockley <ben@pexip.com>
+Date: Tue, 1 Aug 2017 16:47:36 +0100
+Subject: [PATCH] Tell puppet to expect  utf-8 to fix utf-8 handling
+
+---
+ ext/rack/config.ru | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/ext/rack/config.ru b/ext/rack/config.ru
+index 984017e..bf1dbeb 100644
+--- a/ext/rack/config.ru
++++ b/ext/rack/config.ru
+@@ -29,6 +29,9 @@ ARGV << "--vardir"  << "/var/lib/puppet"
+ #
+ # --cprice 2012-05-22
+ 
++# Fix utf8-handling: https://github.com/pexip/mcu/issues/10318
++Encoding.default_external = Encoding::UTF_8
++
+ require 'puppet/util/command_line'
+ # we're usually running inside a Rack::Builder.new {} block,
+ # therefore we need to call run *here*.
+-- 
+2.7.4
+
