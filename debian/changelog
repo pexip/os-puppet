@@ -1,3 +1,9 @@
+puppet (3.7.3-1puppetlabs1pexip8) pexip; urgency=low
+
+  * debian/*.init: add Short-Description to LSB headers
+
+ -- John-Mark Bell <jmb@pexip.com>  Tue, 24 Apr 2018 18:54:48 +0100
+
 puppet (3.7.3-1puppetlabs1pexip7) pexip; urgency=low
 
   * Include fix for Pexip utf-8 issue #10318 (this time done using a patch in debian/patches)
