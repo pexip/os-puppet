@@ -1,3 +1,10 @@
+puppet (3.7.3-1puppetlabs1pexip9) pexip; urgency=low
+
+  * debian/forking.conf: Ensure services created by sysv-generator
+    are correctly treated as daemons.
+
+ -- John-Mark Bell <jmb@pexip.com>  Wed, 27 Jun 2018 22:47:08 +0100
+
 puppet (3.7.3-1puppetlabs1pexip8) pexip; urgency=low
 
   * debian/*.init: add Short-Description to LSB headers

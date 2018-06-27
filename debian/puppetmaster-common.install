@@ -1,2 +1,3 @@
 debian/fileserver.conf etc/puppet
 conf/auth.conf etc/puppet
+debian/forking.conf /lib/systemd/system/puppetqd.service.d
