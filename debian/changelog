@@ -1,3 +1,9 @@
+puppet (3.7.3-1puppetlabs1pexip10) pexip; urgency=low
+
+  * debian/control: Remove unneccesary depends on sysv-rc | file-rc
+
+ -- John-Mark Bell <jmb@pexip.com>  Fri, 03 Aug 2018 18:29:35 +0100
+
 puppet (3.7.3-1puppetlabs1pexip9) pexip; urgency=low
 
   * debian/forking.conf: Ensure services created by sysv-generator
