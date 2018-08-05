@@ -1,0 +1,28 @@
+diff --git a/lib/puppet/defaults.rb b/lib/puppet/defaults.rb
+index a37cfe4..b633811 100644
+--- a/lib/puppet/defaults.rb
++++ b/lib/puppet/defaults.rb
+@@ -463,10 +463,6 @@ module Puppet
+       :default    => "stomp",
+       :desc       => "Which type of queue to use for asynchronous processing.",
+     },
+-    :queue_type => {
+-      :default    => "stomp",
+-      :desc       => "Which type of queue to use for asynchronous processing.",
+-    },
+     :queue_source => {
+       :default    => "stomp://localhost:61613/",
+       :desc       => "Which type of queue to use for asynchronous processing.  If your stomp server requires
+diff --git a/lib/puppet/vendor/safe_yaml/lib/safe_yaml.rb b/lib/puppet/vendor/safe_yaml/lib/safe_yaml.rb
+index 8670ace..94dacc5 100644
+--- a/lib/puppet/vendor/safe_yaml/lib/safe_yaml.rb
++++ b/lib/puppet/vendor/safe_yaml/lib/safe_yaml.rb
+@@ -3,7 +3,7 @@ require "yaml"
+ # This needs to be defined up front in case any internal classes need to base
+ # their behavior off of this.
+ module SafeYAML
+-  YAML_ENGINE = defined?(YAML::ENGINE) ? YAML::ENGINE.yamler : "syck"
++  YAML_ENGINE = defined?(YAML::ENGINE) ? YAML::ENGINE.yamler : "psych"
+ end
+ 
+ require "set"

@@ -1,6 +1,7 @@
 puppet (3.7.3-1puppetlabs1pexip10) pexip; urgency=low
 
   * debian/control: Remove unneccesary depends on sysv-rc | file-rc
+  * debian/patches/ruby2.3.patch: Fixup for ruby 2.3
 
  -- John-Mark Bell <jmb@pexip.com>  Fri, 03 Aug 2018 18:29:35 +0100
 
