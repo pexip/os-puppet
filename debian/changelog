@@ -1,3 +1,9 @@
+puppet (3.7.3-1puppetlabs1pexip11) pexip; urgency=medium
+
+  * Rebuild in buster environment
+
+ -- Steve McIntyre <steve.mcintyre@pexip.com>  Thu, 16 Jul 2020 03:20:52 +0000
+
 puppet (3.7.3-1puppetlabs1pexip10) pexip; urgency=low
 
   * debian/control: Remove unneccesary depends on sysv-rc | file-rc
