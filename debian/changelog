@@ -1,3 +1,13 @@
+puppet (3.7.3-1puppetlabs1pexip12) pexip; urgency=medium
+
+  * Fix some bugs in the puppetmaster-passenger postrm script.
+    + We now assume Apache 2.4, it's been around for a few years now!
+    + Don't assume that a2dissite is available
+    + If it *is* available, a2dissite may return an error if a site is
+      already disabled. Don't error out in the postrm if so.
+
+ -- Steve McIntyre <steve.mcintyre@pexip.com>  Thu, 29 Apr 2021 12:53:14 +0100
+
 puppet (3.7.3-1puppetlabs1pexip11) pexip; urgency=medium
 
   * Rebuild in buster environment

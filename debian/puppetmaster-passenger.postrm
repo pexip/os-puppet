@@ -4,24 +4,6 @@ set -e
 
 sitename="puppetmaster"
 
-# The debian provided a2* utils in Apache 2.4 uses "site name" as
-# argument, while the version in Apache 2.2 uses "file name".
-#
-# For added fun, the Apache 2.4 version requires files to have a
-# ".conf" suffix, but this must be stripped when using it as argument
-# for the a2* utilities.
-#
-# This will end in tears…
-# Can be removed when we only support apache >= 2.4
-apache2_puppetmaster_sitename() {
-    apache2_version="$(dpkg-query --showformat='${Version}\n' --show apache2)"
-    if dpkg --compare-versions "$apache2_version" gt "2.4~"; then
-        echo "${sitename}.conf"
-    else
-        echo "${sitename}"
-    fi
-}
-
 # Can be removed when we only support apache >= 2.4
 restart_apache2() {
     if [ -x "/etc/init.d/apache2" ]; then
@@ -41,11 +23,14 @@ case "$1" in
             dpkg-statoverride --remove /usr/share/puppet/rack/puppetmasterd/config.ru
         fi
         # Remove the puppetmaster site configuration on purge
-        rm -f /etc/apache2/sites-available/$(apache2_puppetmaster_sitename)
+        rm -f /etc/apache2/sites-available/${sitename}.conf
     ;;
     remove)
-        # Disable the puppetmaster apache2 site configuration on package removal
-        a2dissite ${sitename}
+        # Disable the puppetmaster apache2 site configuration on
+        # package removal. Don't bail if this fails - a2dissite may
+        # not be available (apache2 might not be installed), or the
+        # site may already be disabled.
+        a2dissite ${sitename} || true
         restart_apache2
     ;;
     upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
