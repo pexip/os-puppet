@@ -5,6 +5,8 @@ puppet (3.7.3-1puppetlabs1pexip12) pexip; urgency=medium
     + Don't assume that a2dissite is available
     + If it *is* available, a2dissite may return an error if a site is
       already disabled. Don't error out in the postrm if so.
+  * Fix other misc packaging bugs provoking lintian errors:
+    + add dh_installchangelogs
 
  -- Steve McIntyre <steve.mcintyre@pexip.com>  Thu, 29 Apr 2021 12:53:14 +0100
 
